@@ -110,14 +110,29 @@ def next_slice(ax):
 
 
 # %%
-def visualize_subjects(imgs_):
+def visualize_subjects(imgs_,titles,save=False,file=None):
+    plt.figure(figsize=(20,7))
     for i in range(len(imgs_)):
         plt.subplot(1,len(imgs_),i+1)
         plt.imshow(imgs_[i].mean(2))
-        plt.title('Macaque '+ str(i+1))
-        
+        plt.title(titles[i])
+        plt.axis('off')
+    if save:
+        plt.savefig(file+'.png',format='png')
+        plt.savefig(file+'.pdf',format='pdf')
+        plt.close('all')
+    else:
+        plt.show()
+
 # %%
-def plot_loss(losses):
-    plt.plot(losses)
+def plot_loss(losses,save=False,file=None):
+    plt.plot(losses,'k',lw=2)
     plt.xlabel('Iterations')
     plt.ylabel('Loss')
+    
+    if save:
+        plt.savefig(file+'.png',format='png')
+        plt.savefig(file+'.pdf',format='pdf')
+        plt.close('all')
+    else:
+        plt.show()

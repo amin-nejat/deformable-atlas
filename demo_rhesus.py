@@ -37,26 +37,30 @@ V.visualize_subjects(imgs_)
 V.multi_slice_viewer(imgs_[1].transpose(2,0,1))
 
 # %% Create a dataset for training
-imgs = [img[:,:,::10,None][:,:,:,[0,0,0,0]] for img in imgs_]
+imgs = [img[:,:,::10,None] for img in imgs_]
 dataset = D.ImageDataset(np.array(imgs[1:]).transpose([0,4,1,2,3]),device=device)
 dataloader = DataLoader(dataset, batch_size=bs, shuffle=False, num_workers=0)
 
 # %% Initialize atlas and train 
 A = torch.tensor(imgs[0].transpose([3,0,1,2])).to(device).float()
-model = M.ImagePiecewiseRigid(sz=A.shape[1:],A=A,positions=None,centers=None,device=device)
+model = M.ImagePiecewiseRigid(sz=A.shape[1:],A=A,positions=None,centers=None,n_channels=1,device=device)
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
-losses = M.train_model(model,dataloader,optimizer,gamma=1e-3,epochs=100,device=device)
+losses = M.train_model(model,dataloader,optimizer,gamma=1e0,epochs=100,device=device)
 
 # %%
 V.plot_loss(losses[30:])
 
 # %%
 testloader = DataLoader(dataset, batch_size=bs, shuffle=False, num_workers=0)
-registered = np.zeros(list(A.shape[1:])+[4,len(dataset)])
+registered = np.zeros(list(A.shape[1:])+[1,len(dataset)])
 for batch_idx, data in enumerate(testloader):
     x_t,flow,_,_ = model(data[0].to(device),data[1])
     x_t = x_t.detach().cpu().numpy()
     registered[:,:,:,:,batch_idx*bs:batch_idx*bs+x_t.shape[0]] = np.transpose(x_t,[2,3,4,1,0])
 
 # %%
-V.visualize_subjects([np.array(imgs[1:]).mean(0)[:,:,:,0],registered.mean(4)[:,:,:,0]])
+V.visualize_subjects([np.array(imgs[1:]).mean(0),registered.mean(4)])
+
+# %%
+V.multi_slice_viewer(np.array(imgs[1:]).mean(0).squeeze().transpose(2,1,0))
+V.multi_slice_viewer(registered.mean(4).squeeze().transpose(2,1,0))

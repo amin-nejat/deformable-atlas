@@ -151,7 +151,7 @@ class ImagePiecewiseRigid(nn.Module):
         norm = lambda x: torch.exp(-x/std)/torch.exp(-x/std).sum(1)[:,None]
         self.dist = norm(dist)
         
-    
+        if self.A.shape[3] == 1: self.volumetric = False
     
     def forward(self, x, times):
         z = self.localization(x).view(-1, self.numel)
@@ -160,13 +160,15 @@ class ImagePiecewiseRigid(nn.Module):
         
         r,t = self.rigid_t(torch.pi*T[:,:,:3], T[:,:,3:])
         grid = self.piecewise_flow(r,t)[:,:,:,:,[2,1,0]]
-        # grid[:,:,:,:,0] = 0
+        
+        if ~self.volumetric: grid[:,:,:,:,0] = 0
         
         if self.P is not None:
-            reg = torch.stack([ImageFlowField.regularizer(grid[t,:,:,:,[2,1,0]],
-                         self.sz,self.P[:,:,times[t]],self.centers) for t in range(grid.shape[0])])
+            reg = torch.stack([ImagePiecewiseRigid.regularizer(grid[t,:,:,:,[2,1,0]],
+               self.sz,self.P[:,:,times[t]],self.centers) for t in range(grid.shape[0])])
         else:
-            reg = None
+            reg = ImagePiecewiseRigid.regularizer_pr(r,t,self.tess,self.nbs)
+            print(reg)
             
         X_t = F.grid_sample(x,grid)
         
@@ -180,15 +182,13 @@ class ImagePiecewiseRigid(nn.Module):
         
     @staticmethod
     def regularizer_pr(r, t, tess, nbs, eps=.1, device='cuda'):
-        reg = torch.tensor(0.0).to(device)
+        reg = torch.zeros(r.shape[0]).to(device)
         for i in range(len(tess)):
             for j in nbs[i]:
-                Q_ = (tess[i]+tess[j])/2
-                a = (tess[i][0] - tess[j][0])/(tess[j][1] - tess[i][1]+1e-6)
-                Q = torch.stack((torch.tensor([Q_[0]+eps, eps*a+Q_[1], Q_[2]+eps]),
-                                 torch.tensor([Q_[0]-eps,-eps*a+Q_[1], Q_[2]-eps]))).to(device)
-                reg += ((Q@r[i]+t[i]-
-                        (Q@r[j]+t[j]))**2).mean()
+                Q = (tess[i]/2+tess[j]/2)[:,None] + torch.randn(3,2).to(device)
+                Q_i = torch.einsum('bkt,kn->btn',r[:,i,:,:],Q) + t[:,i,:,None]
+                Q_j = torch.einsum('bkt,kn->btn',r[:,j,:,:],Q) + t[:,j,:,None]
+                reg += torch.norm(Q_i-Q_j,dim=2).mean(1)
             
         return reg
     
