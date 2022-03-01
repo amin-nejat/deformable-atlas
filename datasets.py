@@ -44,7 +44,7 @@ class ImageDataset(Dataset):
 class PCImageDataset(Dataset):
     def __init__(self,imgs,positions,device='cuda'):
         self.imgs = torch.tensor(imgs).to(device).float()
-        self.positions = positions
+        self.positions = torch.tensor(positions).to(device).float()
         
     def __len__(self):
         return self.imgs.shape[0]
@@ -56,4 +56,4 @@ class PCImageDataset(Dataset):
         sample = self.imgs[idx,:,:,:,:]
         sample[sample<0] = 0
 
-        return sample,idx
+        return sample,self.positions[:,:,idx]
