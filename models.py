@@ -330,7 +330,7 @@ class PCPiecewiseRigid(nn.Module):
         reg = self.regularizer(X_t)
         return X_t,None,reg,None
     
-    def observation_loss(self,data,gamma=0):
+    def observation_loss(self,data,gamma=.1):
         # Computing negative log likelihood as the cost
         a = data.permute(0,2,1)
         with pyro.plate('neurons',a.size(1)):
