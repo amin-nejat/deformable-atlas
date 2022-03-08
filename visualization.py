@@ -11,8 +11,42 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import numpy as np
 import scipy as sp
+
+# %%
+def visualize_3d(data,p,c,factor=2,save=False,file=None):
+    '''Visualize volumetric image by max projecting on xy, yz, zx.
+    '''
+    
+    orders = [[2,1,0],[0,1,2],[2,0,1]]
+    c[c<0] = 0
+    c = c/c.max()
+    
+    plt.figure(figsize=(20,10))
+    ax1 = plt.subplot2grid((2, 3), (0, 0), colspan=3)
+    ax2 = plt.subplot2grid((2, 3), (1, 0), colspan=2, rowspan=1)
+    ax3 = plt.subplot2grid((2, 3), (1, 2), rowspan=1)
+
+    ax = [ax1,ax2,ax3]
+    
+    for i,o in enumerate(orders):
+        img = data.transpose(o[0],o[1],o[2],3)
+        P = p[:,o]
+        ax[i].scatter(P[:,1],P[:,0],s=10,c=c,marker='o',edgecolor='w')
+        ax[i].imshow(factor*img.max(2)/img.max())
+        ax[i].axis('off')
+        
+    if save:
+        plt.savefig(file+'.png',format='png')
+        plt.savefig(file+'.pdf',format='pdf')
+        plt.close('all')
+    else:
+        plt.show()
+        
+        
 # %%
 def visualize_image(data,p=None,c=None,names=None,olp=False,tol=1e-3,scale=1,microns=1,titlestr='',fontsize=12,save=False,file=None,factor=5):
+    '''Visualize 2d max projected image along with corresponding point clouds
+    '''
     plt.figure(figsize=(18,9))
     plt.imshow(factor*data.max(2)/data.max())
     
@@ -21,7 +55,7 @@ def visualize_image(data,p=None,c=None,names=None,olp=False,tol=1e-3,scale=1,mic
         c = c/c.max()
         P = p.copy()*scale
         pos = optimal_label_positioning(P,lambda_1=10,lambda_2=10,tol=tol) if olp else P
-        plt.scatter(P[:,1],P[:,0],s=100,c=c,marker='o',edgecolor='w')
+        plt.scatter(P[:,1],P[:,0],s=10,c=c,marker='o',edgecolor='w')
         if names is not None:
             for n in range(len(names)):
                 # c[n,:]
@@ -43,7 +77,8 @@ def visualize_image(data,p=None,c=None,names=None,olp=False,tol=1e-3,scale=1,mic
         
 # %%
 def visualize_pc(aligned,atlas=None,names=None,title_str='',olp=False,fontsize=9,dotsize=30,save=False,file=None):
-    
+    '''Visualize point clouds and atlases learned from them
+    '''
     fig = plt.figure(figsize=(15,8))
     ax = fig.add_subplot(111, projection='3d')
     
@@ -88,6 +123,9 @@ def visualize_pc(aligned,atlas=None,names=None,title_str='',olp=False,fontsize=9
 
 
 def optimal_label_positioning(mu,lambda_1=5,lambda_2=5,tol=1e0):
+    '''Using an optimization algorithm to position labels in a non-overlapping
+        arrangement.
+    '''
     n = mu.shape[0]
     D = sp.spatial.distance.squareform(sp.spatial.distance.pdist(mu))
     ll = np.random.rand(n,1)
@@ -106,14 +144,17 @@ def optimal_label_positioning(mu,lambda_1=5,lambda_2=5,tol=1e0):
     return coor
 
 def kk_cost(mu,coor,k,l):
+    '''Cost used for the optimization of the figure labels.
+    '''
     y = np.vstack((mu,coor))
-    
     pdist = sp.spatial.distance.squareform(sp.spatial.distance.pdist(y))
     cost = np.triu(k*(pdist-l)**2,1).sum()
     
     return cost
 # %%
 def axis_equal_3d(ax):
+    '''Equalizing 3D plot axes
+    '''
     extents = np.array([getattr(ax, 'get_{}lim'.format(dim))() for dim in 'xyz'])
     sz = extents[:,1] - extents[:,0]
     centers = np.mean(extents, axis=1)
@@ -125,6 +166,8 @@ def axis_equal_3d(ax):
 
 # %%
 def remove_keymap_conflicts(new_keys_set):
+    '''Helper for multi-slice viewer.
+    '''
     for prop in plt.rcParams:
         if prop.startswith('keymap.'):
             keys = plt.rcParams[prop]
@@ -132,8 +175,10 @@ def remove_keymap_conflicts(new_keys_set):
             for key in remove_list:
                 keys.remove(key)
 
-
 def multi_slice_viewer(volume):
+    '''Visualizing volumetric images by viewing cross sections using keys 'j'
+        and 'k'
+    '''
     remove_keymap_conflicts({'j', 'k'})
     fig, ax = plt.subplots()
     ax.volume = volume
@@ -142,6 +187,8 @@ def multi_slice_viewer(volume):
     fig.canvas.mpl_connect('key_press_event', process_key)
 
 def process_key(event):
+    '''Helper for multi-slice viewer.
+    '''
     fig = event.canvas.figure
     ax = fig.axes[0]
     if event.key == 'j':
@@ -151,24 +198,30 @@ def process_key(event):
     fig.canvas.draw()
 
 def previous_slice(ax):
+    '''Helper for multi-slice viewer.
+    '''
     volume = ax.volume
     ax.index = (ax.index - 1) % volume.shape[0]  # wrap around using %
     ax.images[0].set_array(volume[ax.index])
 
 def next_slice(ax):
+    '''Helper for multi-slice viewer.
+    '''
     volume = ax.volume
     ax.index = (ax.index + 1) % volume.shape[0]
     ax.images[0].set_array(volume[ax.index])
 
 
 # %%
-def visualize_subjects(imgs_,titles,save=False,file=None):
+def visualize_subjects(imgs_,titles,cmap='gray',save=False,file=None):
+    '''Visualize multiple images in subplots.
+    '''
     m = int(np.sqrt(len(imgs_)))
     n = np.ceil(len(imgs_)/m)
-    plt.figure(figsize=(15,9))
+    plt.figure(figsize=(n*6,m*5))
     for i in range(len(imgs_)):
         plt.subplot(m,n,i+1)
-        plt.imshow(imgs_[i].mean(2))
+        plt.imshow(imgs_[i].mean(2),cmap=cmap)
         plt.title(titles[i])
         plt.axis('off')
     if save:
@@ -180,12 +233,14 @@ def visualize_subjects(imgs_,titles,save=False,file=None):
 
 # %%
 def plot_loss(losses,labels=None,titlestr='',fontsize=12,save=False,file=None):
+    '''Plotting the training loss through iterations.
+    '''
     plt.figure(figsize=(10,5))
     
     colors = plt.cm.hsv(np.linspace(0,1,len(losses)+1)[0:-1])[:,0:3]
 
     for i in range(len(losses)):
-        plt.plot(losses[i],color=colors[i],lw=2,label=labels[i])
+        plt.plot(losses[i],color=colors[i],lw=2,label=labels[i],alpha=.5)
         
     plt.yscale('log')
     plt.grid('on')
@@ -197,8 +252,9 @@ def plot_loss(losses,labels=None,titlestr='',fontsize=12,save=False,file=None):
 
     labels, ids = np.unique(labels, return_index=True)
     handles = [handles[i] for i in ids]
-    plt.legend(handles, labels, loc='best')
-
+    plt.legend(handles, labels, loc='best', fontsize=fontsize)
+    plt.xticks(fontsize=fontsize)
+    plt.yticks(fontsize=fontsize)
     
     if save:
         plt.savefig(file+'.png',format='png')
@@ -209,22 +265,55 @@ def plot_loss(losses,labels=None,titlestr='',fontsize=12,save=False,file=None):
         
 # %%
 def plot_bar(val,fontsize=12,titlestr='',ylabel='',ticks=None,save=False,file=None):
+    '''Bar plots for comparing a statistic across different groups.
+    '''
     plt.figure(figsize=(len(val)*2,5))
-    
     colors = plt.cm.hsv(np.linspace(0,1,len(val)+1)[0:-1])[:,0:3]
-    
     ax = plt.boxplot(val,patch_artist=True)
     
     for i in range(len(ax['boxes'])):
         ax['boxes'][i].set(facecolor=colors[i])
 
-
-    # plt.errorbar(np.arange(len(val)), [a.mean() for a in val], yerr=[stats.sem(a)  for a in val],
-    #                    color='k',lw=2)
     plt.xticks(np.arange(1,len(val)+1),ticks,fontsize=fontsize)
     plt.grid('on')
     plt.title(titlestr,fontsize=fontsize)
     plt.ylabel(ylabel,fontsize=fontsize)
+    plt.xticks(fontsize=fontsize)
+    plt.yticks(fontsize=fontsize)
+    
+    if save:
+        plt.savefig(file+'.png',format='png')
+        plt.savefig(file+'.pdf',format='pdf')
+        plt.close('all')
+    else:
+        plt.show()
+
+# %%
+def visualize_t(atlas,a,b,titlestr='',fontsize=15,save=False,file=None):
+    '''Visualizing t-statistic of two populations super-imposed on the atlas.
+    '''
+    plt.figure(figsize=(10,10))
+
+    t,p = stats.ttest_rel(a,b,axis=2)
+    
+    t[np.isnan(t)] = 0
+    p[np.isnan(p)] = 1
+    
+    plt.imshow(t)
+    cbar = plt.colorbar()
+    cbar.ax.tick_params(labelsize=fontsize)
+    
+    from statsmodels.stats import multitest
+    rejected,_ = multitest.fdrcorrection(p.flatten(),alpha=.05)
+    rejected = np.array(rejected).reshape(p.shape).astype(float)
+    rejected[atlas < 0.1] = 0
+    # rejected = (p<.05/t.size).astype(float)
+    
+    plt.imshow(atlas, cmap='gray')
+    plt.imshow(t,alpha=rejected, cmap='viridis')
+    plt.axis('off')
+    
+    plt.title(titlestr,fontsize=fontsize)
     
     if save:
         plt.savefig(file+'.png',format='png')

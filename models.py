@@ -11,13 +11,27 @@ import pyro.distributions as dist
 import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
-import utils as U
 import torch
 import pyro
 
 # %%
 class ImageFlowField(nn.Module):
+    '''Class for learning atlases for image datasets using free form flow field
+        transformations with regularization using point cloud positions.
+    '''
     def __init__(self,sz,A,positions=None,centers=None,n_channels=4,device='cuda'):
+        '''Class constructor
+
+        Parameters
+        ----------
+        sz : TYPE
+        A : TYPE
+        positions : TYPE, optional
+        centers : TYPE, optional
+        n_channels : TYPE, optional
+        device : TYPE, optional
+        '''
+        
         super(ImageFlowField, self).__init__()
         # Spatial transformer localization-network
         self.encoder = nn.Sequential(
@@ -77,13 +91,16 @@ class ImageFlowField(nn.Module):
     def regularizer(grid,sz,P,Q):
         a = grid[P.round().long().T.tolist()]
         moved = 2*P-(.5+.5*a)*(sz-1)
-        d_ = torch.cdist(moved,Q) 
+        d_ = torch.cdist(moved.contiguous(),Q.contiguous()) 
         reg = d_.diag().mean()
         return reg
     
     
 # %%
 class ImagePiecewiseRigid(nn.Module):
+    '''Class for learning atlases for image datasets using piecewise rigid (or rigid)
+        transformations with regularization using point cloud positions.
+    '''
     def __init__(self,sz,A,tess=None,nbs=None,reg_pc=True,centers=None,n_channels=4,std=10,device='cuda'):
         super(ImagePiecewiseRigid, self).__init__()
         # Spatial transformer localization-network
@@ -227,7 +244,6 @@ class ImagePiecewiseRigid(nn.Module):
         
         return jac.view((jac.shape[0],self.sz[0].int().item(),self.sz[1].int().item(),self.sz[2].int().item()))
         
-
         
     def piecewise_flow(self,r,t):
         flow = (torch.einsum('lk,btks->btls',self.grid,r)+t[:,:,None,:])*self.dist.T[None,:,:,None]
@@ -236,9 +252,10 @@ class ImagePiecewiseRigid(nn.Module):
     
     
     def observation_loss(self,data):
-        loss = F.mse_loss(data,self.A[None,...])
+        loss = -(data*self.A[None,...]).mean()
+        # loss = F.mse_loss(data,self.A[None,...])
         return loss
-        # loss = -(data*self.A[None,...]).mean()
+        
         
     def estimate_theta(self,aligned):
         self.A = aligned.mean(0)
@@ -246,18 +263,18 @@ class ImagePiecewiseRigid(nn.Module):
 
 # %%
 class PCPiecewiseRigid(nn.Module):
+    '''Class for learning atlases for point cloud datasets using piecewise rigid
+        (or rigid) transformations with regularization using pairwise distances 
+        of CoM of pieces. Prior atlas distribution over position is multivariate 
+        normal while the prior over the color is dirichlet.
+    '''
     def __init__(self,A,sz,tess=None,mask=None,device='cuda'):
         super(PCPiecewiseRigid, self).__init__()
-        # Spatial transformer localization-network
+        
         self.tess = [np.arange(A.shape[1])] if tess is None else tess
-        # self.nbs = [] if nbs is None else nbs
-        
         self.mask = torch.zeros((0,0)).to(device) if mask is None else torch.tensor(mask).to(device) 
-        # self.mask = torch.zeros((len(self.tess),len(self.tess))).to(device)
-        # for i in range(len(self.nbs)):
-        #     for j in self.nbs[i]:
-        #         self.mask[i,j] = 1
         
+        # Localization-network
         self.localization = nn.Sequential(
             nn.Linear(A.shape[1]*3, 32),
             nn.ReLU(True),
@@ -283,8 +300,8 @@ class PCPiecewiseRigid(nn.Module):
         self.localization[2].weight.data.zero_()
         self.localization[2].bias.data.zero_()
         
-        self.theta_c = torch.ones((A.shape[1],3)).to(device)
-        self.theta_l = torch.ones((A.shape[1],3)).to(device)
+        self.theta_c = self.A[3:,:].T
+        self.theta_l = self.A[:3,:].T
         
         self.sigma_c = torch.ones((1)).to(device)
         self.sigma_l = torch.ones((1)).to(device)
@@ -313,27 +330,23 @@ class PCPiecewiseRigid(nn.Module):
         reg = self.regularizer(X_t)
         return X_t,None,reg,None
     
-    def observation_loss(self,data,gamma=.1):
+    def observation_loss(self,data,gamma=0):
         # Computing negative log likelihood as the cost
         a = data.permute(0,2,1)
         with pyro.plate('neurons',a.size(1)):
             with pyro.plate('data',a.size(0)):
                 loss_c = -dist.Dirichlet(self.theta_c).log_prob(a[:,:,3:])
-                # loss_c = -dist.MultivariateNormal(self.theta_c,self.sigma_c*torch.eye(3).to(self.device)).log_prob(a[:,:,3:])
                 loss_l = -dist.MultivariateNormal(self.theta_l,self.sigma_l*torch.eye(3).to(self.device)).log_prob(a[:,:,:3])
         return loss_l.mean()+gamma*loss_c.mean()
         
     def prior(self,data):
         theta_c = pyro.param('theta_c', self.theta_c)
         theta_l = pyro.param('theta_l', self.theta_l)
-        
-        # sigma_c = pyro.param('sigma_c', self.sigma_c, constraint=constraints.positive)
         sigma_l = pyro.param('sigma_l', self.sigma_l, constraint=constraints.positive)
         
         with pyro.plate('neurons',data.size(1)):
             with pyro.plate('data',data.size(0)):
                 pyro.sample('obs_c', dist.Dirichlet(theta_c),obs=data[:,:,3:])
-                # pyro.sample('obs_c', dist.MultivariateNormal(theta_c,sigma_c*torch.eye(3).to(self.device)),obs=data[:,:,3:])
                 pyro.sample('obs_l', dist.MultivariateNormal(theta_l,sigma_l*torch.eye(3).to(self.device)),obs=data[:,:,:3])
     
     def estimate_theta(self,aligned,lr=1.,thresh=10,patience=10):
@@ -357,8 +370,6 @@ class PCPiecewiseRigid(nn.Module):
         with torch.no_grad():
             self.theta_c = pyro.param('theta_c')
             self.theta_l = pyro.param('theta_l')
-            
-            # self.sigma_c = pyro.param('sigma_c')
             self.sigma_l = pyro.param('sigma_l')
             
             self.A = torch.cat((self.theta_l,self.theta_c),1).T
@@ -396,6 +407,12 @@ class PCPiecewiseRigid(nn.Module):
 # %%
 
 class PCPiecewiseRigidNormal(PCPiecewiseRigid):
+    '''Class for learning atlases for point cloud datasets using piecewise rigid
+        (or rigid) transformations with regularization using pairwise distances 
+        of CoM of pieces. Prior atlas distribution over position and color is 
+        multivariate normal.
+    '''
+    
     def observation_loss(self,data,gamma=.1):
         # Computing negative log likelihood as the cost
         a = data.permute(0,2,1)
@@ -447,6 +464,23 @@ class PCPiecewiseRigidNormal(PCPiecewiseRigid):
 
 # %%
 def train_model(model,dataloader,optimizer,gamma=0,epochs=20,epochs_theta=10,device='cuda'):
+    '''Training one of the model instances using batches of data.
+
+    Parameters
+    ----------
+    model (nn.Module): and instance of the model to be trained (check specific instances).
+    dataloader (torch.utils.data.Dataset): pytorch dataloader class (check datasets.py).
+    optimizer (torch.optim): pytorch optimizer module (normally we use Adam).
+    gamma (float): regularization (different for each model, check specific instances).
+    epochs (int): number of epochs overall for training atlas.
+    epochs_theta (int): number of epochs after which theta is updated.
+    device (string): 'cpu' or 'cuda'.
+
+    Returns
+    -------
+    losses (list): training losses through iterations.
+    '''
+    
     losses = []
     
     for epoch in range(1,epochs+1):
