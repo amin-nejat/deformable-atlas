@@ -13,13 +13,14 @@ import numpy as np
 import scipy as sp
 
 # %%
-def visualize_3d(data,p,c,factor=2,save=False,file=None):
+def visualize_3d(data,p=None,c=None,factor=2,save=False,file=None):
     '''Visualize volumetric image by max projecting on xy, yz, zx.
     '''
     
     orders = [[2,1,0],[0,1,2],[2,0,1]]
-    c[c<0] = 0
-    c = c/c.max()
+    if c is not None:
+        c[c<0] = 0
+        c = c/c.max()
     
     plt.figure(figsize=(20,10))
     ax1 = plt.subplot2grid((2, 3), (0, 0), colspan=3)
@@ -30,8 +31,9 @@ def visualize_3d(data,p,c,factor=2,save=False,file=None):
     
     for i,o in enumerate(orders):
         img = data.transpose(o[0],o[1],o[2],3)
-        P = p[:,o]
-        ax[i].scatter(P[:,1],P[:,0],s=10,c=c,marker='o',edgecolor='w')
+        if p is not None:
+            P = p[:,o]
+            ax[i].scatter(P[:,1],P[:,0],s=10,c=c,marker='o',edgecolor='w')
         ax[i].imshow(factor*img.max(2)/img.max())
         ax[i].axis('off')
         
@@ -232,7 +234,7 @@ def visualize_subjects(imgs_,titles,cmap='gray',save=False,file=None):
         plt.show()
 
 # %%
-def plot_loss(losses,labels=None,titlestr='',fontsize=12,save=False,file=None):
+def plot_loss(losses,labels=None,titlestr='',fontsize=12,yscale='log',save=False,file=None):
     '''Plotting the training loss through iterations.
     '''
     plt.figure(figsize=(10,5))
@@ -242,7 +244,7 @@ def plot_loss(losses,labels=None,titlestr='',fontsize=12,save=False,file=None):
     for i in range(len(losses)):
         plt.plot(losses[i],color=colors[i],lw=2,label=labels[i],alpha=.5)
         
-    plt.yscale('log')
+    plt.yscale(yscale)
     plt.grid('on')
     plt.xlabel('Iterations',fontsize=fontsize)
     plt.ylabel('Loss',fontsize=fontsize)

@@ -163,9 +163,12 @@ class ImagePiecewiseRigid(nn.Module):
         T = T.view(x.shape[0],len(self.tess),6)
         
         r,t = self.rigid_t(torch.pi*T[:,:,:3], T[:,:,3:])
+        if ~self.volumetric:
+            r[:,:,2] = 0
+            t[:,:,2] = 0
+        
         grid = self.piecewise_flow(r,t)[:,:,:,:,[2,1,0]]
         
-        if ~self.volumetric: grid[:,:,:,:,0] = 0
         
         if self.reg_pc:
             reg = torch.stack([ImagePiecewiseRigid.regularizer(grid[t,:,:,:,[2,1,0]],
@@ -258,7 +261,7 @@ class ImagePiecewiseRigid(nn.Module):
         
         
     def estimate_theta(self,aligned):
-        self.A = aligned.mean(0)
+        self.A = aligned.mean(0).detach()
         
 
 # %%
@@ -501,7 +504,134 @@ def train_model(model,dataloader,optimizer,gamma=0,epochs=20,epochs_theta=10,dev
                 print('Reg: ' + str(reg))
         
         if (epoch+1) % epochs_theta == 0:
-            model.estimate_theta(X_t.detach())
+            model.estimate_theta(X_t)
         
     return losses
     
+# %%
+class ImagePiecewiseRigidMR(ImagePiecewiseRigid):
+    '''Class for learning atlases for image datasets using piecewise rigid (or rigid)
+        transformations with regularization using point cloud positions.
+    '''
+    def __init__(self,sz,A,tess=None,nbs=None,reg_pc=True,centers=None,n_channels=4,std=10,device='cuda'):
+        super(ImagePiecewiseRigid, self).__init__()
+        # Spatial transformer localization-network
+        resolutions = [[1,1,1],[2,2,1],[4,4,1]]
+        self.gammas = [1,4,16]
+        self.avgpools = [nn.AvgPool3d(kernel_size=res, stride=res) for res in resolutions]
+        
+        self.localization = nn.Sequential(
+            nn.Conv3d(n_channels, 8, kernel_size=[7,7,1]),
+            nn.MaxPool3d([2,2,1], stride=[2,2,1]),
+            nn.ReLU(True),
+            nn.Conv3d(8, 10, kernel_size=[5,5,1]),
+            nn.MaxPool3d([2,2,1], stride=[2,2,1]),
+            nn.ReLU(True)
+        )
+        
+        comp_sz = lambda x: (((x-6)//2)-4)//2
+        
+        self.device = device
+        self.sz = torch.tensor(sz).float().to(device)
+        self.center = (torch.tensor(self.sz)/2).float().to(device)
+        self.numel = 10*comp_sz(sz[0])*comp_sz(sz[1])*sz[2]
+        # Regressor for the 3 * 2 affine matrix
+        
+        tess = torch.tensor([sz/2]) if tess is None else torch.tensor(tess)
+        tess = tess.float().to(device)
+        self.nbs = [[]] if nbs is None else nbs
+        
+        szs = [[sz[i]//res[i] for i in range(3)] for res in resolutions]
+        self.szs = [torch.tensor(sz_).float().to(device) for sz_ in szs]
+        grids = [torch.tensor(np.array(np.where(np.ones(list(szs[i]))),dtype=float).T).float().to(device) for i in range(len(resolutions))]
+        grids = [2*grids[i]/self.szs[i][None,:]-1 for i in range(len(grids))]
+        self.grids = grids
+        
+        # self.grid = grid
+        
+        self.fc_loc = nn.Sequential(
+            nn.Linear(self.numel, 32),
+            nn.ReLU(True),
+            nn.Linear(32, 6*len(tess)),
+            nn.Tanh()
+        )
+
+        # Initialize the weights/bias with identity transformation
+        self.fc_loc[2].weight.data.zero_()
+        self.fc_loc[2].bias.data.zero_()
+        
+        torch.pi = torch.acos(torch.zeros(1)).item()
+        
+        self.A = A
+        self.to(device)
+        
+        
+        self.centers = centers.to(device).float() if centers is not None else None
+        self.tesses = [tess/torch.tensor(res).float().to(device) for res in resolutions]
+        # precompute
+        
+        dists = [torch.cdist(self.grids[i], self.tesses[i]) for i in range(len(self.tesses))]
+        norm = lambda x: torch.exp(-x/std)/torch.exp(-x/std).sum(1)[:,None]
+        
+        self.dists = [norm(dist) for dist in dists]
+        self.volumetric = False if self.A.shape[3] == 1 else True
+        self.reg_pc = reg_pc
+    
+    def forward(self, x, pos):
+        z = self.localization(x).view(-1, self.numel)
+        T = self.fc_loc(z)
+        T = T.view(x.shape[0],len(self.tesses[0]),6)
+        
+        r,t = self.rigid_t(torch.pi*T[:,:,:3], T[:,:,3:])
+        if ~self.volumetric:
+            r[:,:,2] = 0
+            t[:,:,2] = 0
+        
+        grids = self.piecewise_flow(r,t)
+        grids = [grid[:,:,:,:,[2,1,0]] for grid in grids]
+        
+        
+        # if self.reg_pc:
+        #     reg = torch.stack([ImagePiecewiseRigid.regularizer(grid[t,:,:,:,[2,1,0]],
+        #        self.sz,pos[t,:,:],self.centers) for t in range(grid.shape[0])])
+        # else:
+        reg = ImagePiecewiseRigidMR.regularizer_pr(r,t,self.tesses[0],self.nbs)
+    
+        xs = [self.avgpools[i](x) for i in range(len(self.avgpools))]
+        X_t = [F.grid_sample(xs[i],grids[i]) for i in range(len(self.avgpools))]
+        
+        
+        moved = []
+        if self.reg_pc:
+            for t in range(grids[0].shape[0]):
+                a = grids[0][t,:,:,:,[2,1,0]][pos[t,:,:].round().long().T.tolist()]
+                moved.append(2*pos[t,:,:]-(.5+.5*a)*(self.sz-1))
+            
+        return X_t,grids,reg,moved
+
+    def observation_loss(self,datas):
+        # loss = [gammas[i]*torch.norm(datas[i]-self.avgpools[i](self.A[None,...]),p=1)
+        #             for i in range(len(self.avgpools))]
+        loss = [-self.gammas[i]*(datas[i]*self.avgpools[i](self.A[None,...])).mean() for i in range(len(self.avgpools))]
+        # loss = F.mse_loss(data,self.A[None,...])
+        return torch.stack(loss).sum()
+		
+    def piecewise_flow(self,r,t):
+        norm_flows = [(torch.einsum('lk,btks->btls',self.grids[i],r)+
+                  t[:,:,None,:])*self.dists[i].T[None,:,:,None] for i in range(len(self.avgpools))]
+        # norm_flows = [2*flows[i].sum(1)/self.szs[i][None,None,:]-1 for i in range(len(flows))]
+        pw_flows = [norm_flows[i].sum(1).view((r.shape[0],self.szs[i][0].int().item(),self.szs[i][1].int().item(),self.szs[i][2].int().item(),3)) 
+                    for i in range(len(self.szs))]
+        return pw_flows
+    
+    def det_jac(self,x,pos):
+        z = self.localization(x).view(-1, self.numel)
+        T = self.fc_loc(z)
+        T = T.view(x.shape[0],len(self.tesses[0]),6)
+        r,_ = self.rigid_t(torch.pi*T[:,:,:3], T[:,:,3:])
+        jac = torch.einsum('nk,bkst->bnst',self.dists[0],r).det()
+        
+        return jac.view((jac.shape[0],self.sz[0].int().item(),self.sz[1].int().item(),self.sz[2].int().item()))
+
+    def estimate_theta(self,aligned):
+        self.A = aligned[0].mean(0).detach()
