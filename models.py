@@ -4,15 +4,24 @@ Created on Thu Feb 10 10:09:22 2022
 
 @author: Amin
 """
+import networkx as nx
 
 from torch.distributions import constraints
-from pyro.infer import SVI, Trace_ELBO
-import pyro.distributions as dist
+
+from sklearn.neighbors import kneighbors_graph
+
 import torch.nn.functional as F
 import torch.nn as nn
+
+from pyro.infer import SVI, Trace_ELBO
+
+import pyro.distributions as dist
+import pyro
+
 import numpy as np
 import torch
-import pyro
+
+import utils
 
 # %%
 class ImageFlowField(nn.Module):
@@ -101,7 +110,10 @@ class ImagePiecewiseRigid(nn.Module):
     '''Class for learning atlases for image datasets using piecewise rigid (or rigid)
         transformations with regularization using point cloud positions.
     '''
-    def __init__(self,sz,A,tess=None,nbs=None,reg_pc=True,centers=None,n_channels=4,std=10,device='cuda'):
+    def __init__(
+            self,sz,A,mesh=[2,2,1],tess=None,nbs=None,
+            reg_pc=True,centers=None,positions=None,n_channels=4,std=10,device='cuda'
+        ):
         super(ImagePiecewiseRigid, self).__init__()
         # Spatial transformer localization-network
         self.localization = nn.Sequential(
@@ -121,9 +133,16 @@ class ImagePiecewiseRigid(nn.Module):
         self.numel = 10*comp_sz(sz[0])*comp_sz(sz[1])*sz[2]
         # Regressor for the 3 * 2 affine matrix
         
+        n_rows,n_cols,n_secs = mesh
+        tess = [np.array([(2*r+1)*sz[0]/(2*n_rows),(2*c+1)*sz[1]/(2*n_cols),(2*s+1)*sz[2]/(2*n_secs)]) 
+                for r in range(n_rows) for c in range(n_cols) for s in range(n_secs)]
+        if n_rows*n_cols*n_secs == 1: nbs = [[]]
+        else:  nbs = [[i for i in nx.Graph(kneighbors_graph(np.array(tess),2)).neighbors(j)] for j in range(len(tess))]
+        
         self.tess = torch.tensor([sz/2]) if tess is None else torch.tensor(tess)
         self.tess = self.tess.float().to(device)
         self.nbs = [[]] if nbs is None else nbs
+
         
         grid = torch.tensor(np.array(np.where(np.ones(list(sz))),dtype=float).T).float().to(device)
         
@@ -142,7 +161,7 @@ class ImagePiecewiseRigid(nn.Module):
         
         torch.pi = torch.acos(torch.zeros(1)).item()
         
-        self.A = A
+        self.A = A.to(device)
         self.to(device)
         
         
@@ -152,61 +171,55 @@ class ImagePiecewiseRigid(nn.Module):
         dist = torch.cdist(self.grid, self.tess)
         norm = lambda x: torch.exp(-x/std)/torch.exp(-x/std).sum(1)[:,None]
         self.dist = norm(dist)
-        
         self.volumetric = False if self.A.shape[3] == 1 else True
-        
-        self.reg_pc = reg_pc
+
+        if positions is not None:
+            self.positions = positions.permute(2,0,1).to(device)
+            norm = lambda x: torch.exp(-x/std)/torch.exp(-x/std).sum(2)[...,None]
+            dist_pc = torch.cdist(self.positions, self.tess[None])
+            self.dist_pc = norm(dist_pc)
     
-    def forward(self, x, pos):
+    def forward(self,x,idx):
         z = self.localization(x).view(-1, self.numel)
-        T = self.fc_loc(z)
-        T = T.view(x.shape[0],len(self.tess),6)
-        
+        T = self.fc_loc(z).view(x.shape[0],len(self.tess),6)
         r,t = self.rigid_t(torch.pi*T[:,:,:3], T[:,:,3:])
-        if ~self.volumetric:
-            r[:,:,2] = 0
-            t[:,:,2] = 0
         
-        grid = self.piecewise_flow(r,t)[:,:,:,:,[2,1,0]]
+        grid = self.piecewise_flow(r,t)
+        if not self.volumetric: grid[:,:,:,:,2] = 0
         
-        
-        if self.reg_pc:
-            reg = torch.stack([ImagePiecewiseRigid.regularizer(grid[t,:,:,:,[2,1,0]],
-               self.sz,pos[t,:,:],self.centers) for t in range(grid.shape[0])])
-        else:
-            reg = ImagePiecewiseRigid.regularizer_pr(r,t,self.tess,self.nbs)
-            
+        reg_ss = self.regularizer_ss(r,t,idx) if self.centers is not None else None
+        reg_mm = self.regularizer(r,t)
+
         X_t = F.grid_sample(x,grid)
         
-        moved = []
-        if self.reg_pc:
-            for t in range(grid.shape[0]):
-                a = grid[t,:,:,:,[2,1,0]][pos[t,:,:].round().long().T.tolist()]
-                moved.append(2*pos[t,:,:]-(.5+.5*a)*(self.sz-1))
-            
-        return X_t,grid,reg,moved
+
         
-    @staticmethod
-    def regularizer_pr(r, t, tess, nbs, eps=.1, device='cuda'):
-        reg = torch.zeros(r.shape[0]).to(device)
-        for i in range(len(tess)):
-            for j in nbs[i]:
-                Q = (tess[i]/2+tess[j]/2)[:,None] + torch.randn(3,2).to(device)
+        return X_t,grid,reg_ss,reg_mm
+    
+    def regularizer(self,r,t,eps=.1):
+        reg = torch.zeros(r.shape[0]).to(self.device)
+        for i in range(len(self.tess)):
+            for j in self.nbs[i]:
+                Q = (self.tess[i]/2+self.tess[j]/2)[:,None] + torch.randn(3,2).to(self.device)
                 Q_i = torch.einsum('bkt,kn->btn',r[:,i,:,:],Q) + t[:,i,:,None]
                 Q_j = torch.einsum('bkt,kn->btn',r[:,j,:,:],Q) + t[:,j,:,None]
                 reg += torch.norm(Q_i-Q_j,dim=2).mean(1)
             
         return reg
     
-    @staticmethod
-    def regularizer(grid,sz,P,Q):
-        a = grid[P.round().long().T.tolist()]
-        moved = 2*P-(.5+.5*a)*(sz-1)
-        d_ = torch.cdist(moved,Q)
-        reg = d_.diag().mean()
-        
+    def regularizer_ss(self,r,t,idx):
+        pos = self.positions[idx]
+        moved = ((torch.einsum('blk,btks->blts',self.centers[None],r)+t[:,None,:,:])*self.dist_pc[idx][...,None]).sum(2)
+        reg = ((moved-pos)**2).sum(2).mean(1)
         return reg
     
+    def piecewise_flow(self,r,t):
+        flow = (torch.einsum('lk,btks->btls',self.grid,r)+t[:,:,None,:])*self.dist.T[None,:,:,None]
+        sz = self.sz.clone()
+        if sz[2] == 1: sz[2] = 2
+        norm_flow = 2*flow.sum(1)/(sz[None,None,:]-1)-1
+        return norm_flow.view((r.shape[0],self.sz[0].int().item(),self.sz[1].int().item(),self.sz[2].int().item(),3))[...,[2,1,0]]
+
     
     def rigid_t(self,alpha,trans):
         cos = torch.cos(alpha)
@@ -244,25 +257,129 @@ class ImagePiecewiseRigid(nn.Module):
         T = T.view(x.shape[0],len(self.tess),6)
         r,_ = self.rigid_t(torch.pi*T[:,:,:3], T[:,:,3:])
         jac = torch.einsum('nk,bkst->bnst',self.dist,r).det()
-        
         return jac.view((jac.shape[0],self.sz[0].int().item(),self.sz[1].int().item(),self.sz[2].int().item()))
-        
-        
-    def piecewise_flow(self,r,t):
-        flow = (torch.einsum('lk,btks->btls',self.grid,r)+t[:,:,None,:])*self.dist.T[None,:,:,None]
-        norm_flow = 2*flow.sum(1)/self.sz[None,None,:]-1
-        return norm_flow.view((r.shape[0],self.sz[0].int().item(),self.sz[1].int().item(),self.sz[2].int().item(),3))
-    
-    
+
     def observation_loss(self,data):
         loss = -(data*self.A[None,...]).mean()
-        # loss = F.mse_loss(data,self.A[None,...])
         return loss
-        
         
     def estimate_theta(self,aligned):
         self.A = aligned.mean(0).detach()
         
+# %%
+class ImageQuadratic(nn.Module):
+    def __init__(
+            self,sz,A,mesh=[2,2,1],centers=None,
+            positions=None,n_channels=4,std=10,device='cuda'
+        ):
+        super().__init__()
+        
+        self.sz = torch.tensor(sz).float().to(device)
+        
+        flow_id = torch.cat(torch.where(torch.ones(list(sz)))).reshape([3]+list(sz)).permute([1,2,3,0]).float().to(device)
+        flow_id = 2*flow_id/(self.sz-1)-1
+        flow_id[torch.isnan(flow_id)] = 0
+        
+        self.transformed = utils.quadratic_basis(flow_id).to(device)
+        
+        self.betas = [
+                torch.zeros(1,3)[:,:,None].repeat(1,1,positions.shape[2]).to(device),
+                torch.zeros(1,3)[:,:,None].repeat(1,1,positions.shape[2]).to(device),
+                torch.zeros(6,3)[:,:,None].repeat(1,1,positions.shape[2]).to(device)
+            ]
+        
+        for i in range(len(self.betas)): self.betas[i].requires_grad = True
+        
+        self.device = device
+        
+        n_rows,n_cols,n_secs = [2,2,1] 
+        tess = [np.array([(2*r+1)*sz[0]/(2*n_rows),(2*c+1)*sz[1]/(2*n_cols),(2*s+1)*sz[2]/(2*n_secs)]) 
+                for r in range(n_rows) for c in range(n_cols) for s in range(n_secs)]
+        self.tess = torch.tensor(tess).float().to(device)
+        
+        torch.pi = torch.acos(torch.zeros(1)).item()
+        
+        self.A = A.to(device)
+        self.to(device)
+        
+        self.centers = centers.to(device).float() if centers is not None else None
+        
+        # precompute
+        self.volumetric = False if self.A.shape[3] == 1 else True
+        self.positions = positions.to(device)
+
+    
+    @property
+    def beta(self):
+        return torch.cat([
+                    torch.tanh(self.betas[0]), 
+                    self.rotation(torch.tanh(self.betas[1].permute(0,2,1))*torch.pi)[0], 
+                    torch.tanh(self.betas[2])
+                ],0)
+        
+    def parameters(self):
+        return self.betas
+    
+    # Spatial transformer network forward function
+    def forward(self,x,idx):
+        grid = torch.einsum('mnza,abt->tmnzb', self.transformed, self.beta[:,:,idx])[...,[2,1,0]]
+        if not self.volumetric: grid[:,:,:,:,2] = 0
+        X_t = F.grid_sample(x,grid)
+
+        reg_ss = self.regularizer_ss(idx)
+        reg_mm = ((utils.quadratic_det_jac(self.beta[:,:,idx],self.tess.T)-1)**2).sum(1)
+        
+        return X_t,grid,reg_ss,reg_mm
+    
+    def regularizer_ss(self,idx):
+        if self.positions is None or self.positions.shape[2] == 1: return None
+        
+        sz = self.sz.clone()
+        if sz[2] == 1: sz[2] = 0
+        
+        P = -1+2*self.positions[:,:,idx]/(sz[None,:,None]-1)
+        Q = -1+2*self.centers/(sz[None,:]-1)
+        
+        Q_q = utils.quadratic_basis(Q).to(self.device)
+        # Q_q = torch.stack([utils.quadratic_basis(Q[:,:,t]).to(self.device) for t in range(len(idx))])
+        moved = torch.einsum('abt,tna->nbt',self.beta[:,:,idx],Q_q[None,:,:])
+        
+        reg = ((moved-P)**2).sum(1).mean(0)
+        return reg
+    
+    def rotation(self,alpha):
+        cos = torch.cos(alpha)
+        sin = torch.sin(alpha)
+        z = torch.zeros(alpha[:,:,0].shape).to(self.device)
+        o = torch.ones(alpha[:,:,0].shape).to(self.device)
+        
+        b,t,_ = alpha.shape
+        
+        X = torch.stack((cos[:,:,0],-sin[:,:,0],z,
+                         sin[:,:,0], cos[:,:,0],z,
+                         z,z,o)
+                        ,2).view(b,t,3,3)
+        
+        Y = torch.stack((cos[:,:,1],z,sin[:,:,1],
+                         z,o,z,
+                         -sin[:,:,1],z,cos[:,:,1])
+                        ,2).view(b,t,3,3)
+        
+        Z = torch.stack((o,z,z,
+                         z,cos[:,:,2],-sin[:,:,2],
+                         z,sin[:,:,2], cos[:,:,2])
+                        ,2).view(b,t,3,3)
+        
+        XYZ = torch.einsum('btmn,btnk,btks->btms',X,Y,Z)
+        
+        return XYZ.permute(0,2,3,1)
+    
+    def observation_loss(self,data):
+        loss = -(data*self.A[None,...]).mean()
+        return loss
+
+    def estimate_theta(self,aligned):
+        self.A = aligned.mean(0).detach()
 
 # %%
 class PCPiecewiseRigid(nn.Module):
@@ -466,7 +583,7 @@ class PCPiecewiseRigidNormal(PCPiecewiseRigid):
 
 
 # %%
-def train_model(model,dataloader,optimizer,gamma=0,epochs=20,epochs_theta=10,device='cuda'):
+def train_model(model,dataloader,optimizer,gamma_re=1,gamma_ss=0,gamma_mm=0,epochs=20,epochs_theta=10,device='cuda'):
     '''Training one of the model instances using batches of data.
 
     Parameters
@@ -491,9 +608,13 @@ def train_model(model,dataloader,optimizer,gamma=0,epochs=20,epochs_theta=10,dev
         model.train()
         for batch_idx, data in enumerate(dataloader):
             optimizer.zero_grad()
-            X_t,_,reg,_ = model(data[0].to(device),data[1])
+            X_t,_,reg_ss,reg_mm = model(data[0].to(device),data[1].to(device))
             recon = model.observation_loss(X_t)
-            loss = recon+gamma*reg.mean() if reg is not None else recon
+            
+            loss = gamma_re*recon
+            if reg_ss is not None: loss += gamma_ss*reg_ss.mean()
+            if reg_mm is not None: loss += gamma_mm*reg_mm.mean()
+            
             loss.backward()
             optimizer.step()
             
@@ -501,7 +622,8 @@ def train_model(model,dataloader,optimizer,gamma=0,epochs=20,epochs_theta=10,dev
             
             if batch_idx % 10 == 0:
                 print('Recon: ' + str(recon))
-                print('Reg: ' + str(reg))
+                print('SS Regularization: ' + str(reg_ss))
+                print('MM Regularization: ' + str(reg_mm))
         
         if (epoch+1) % epochs_theta == 0:
             model.estimate_theta(X_t)

@@ -199,30 +199,38 @@ class NeuroPALDataset(Dataset):
 
         data_body = np.array(data_body).transpose([0,4,1,2,3])
 
-        avg = nn.AvgPool3d(kernel_size=df[::-1], stride=df[::-1])
+        avg = nn.AvgPool3d(kernel_size=df, stride=df)
 
         neurons,col,pos,_ = utils.sort_mu(ims_body,neurons_body,min_counts=len(ims_body))
-        self.positions = torch.tensor(pos)/scales.T[None,:,:]
+        positions = torch.tensor(pos)/scales.T[None,:,:]
 
-
-        self.bounds = torch.tensor([(self.positions[:,i].min()-margin[i],self.positions[:,i].max()+margin[i]) for i in range(3)]).int()
+        
+        self.bounds = torch.tensor([(positions[:,i].min()-margin[i],positions[:,i].max()+margin[i]) for i in range(3)]).int()
         self.bounds[:,0] = torch.maximum(self.bounds[:,0],torch.zeros(3))
         self.bounds[:,1] = torch.minimum(self.bounds[:,1],torch.tensor(sz[:3].copy()))
 
-        self.positions -= self.bounds[:,0][None,:,None]
-        self.positions /= np.array(df).astype(np.float32)[:,None]
-
-        data = data_body[:,:,self.bounds[0,0]:self.bounds[0,1],
-                             self.bounds[1,0]:self.bounds[1,1],
-                             self.bounds[2,0]:self.bounds[2,1]].astype(np.float32)
+        positions -= self.bounds[:,0][None,:,None]
+        positions /= np.array(df).astype(np.float32)[:,None]
         
-        self.shape = np.array(data.shape[::-1])
-        self.shape[:3] = (self.bounds[:,1] - self.bounds[:,0]) // np.array(df)
+        data = data_body.astype(np.float32)
+        data = data_body[:,:,self.bounds[0,0]:self.bounds[0,1],
+                              self.bounds[1,0]:self.bounds[1,1],
+                              self.bounds[2,0]:self.bounds[2,1]].astype(np.float32)
+        
+        
+        positions = positions[:,[2,1,0],:].float()
+        data = torch.tensor(data).float()
 
-        self.data = torch.tensor(data)
-        self.data = avg(self.data)
+        self.A = avg(data[0]).permute(0,3,2,1)
+        self.data = avg(data[1:])
+        
+        self.shape = np.array(self.data.shape[::-1][:-1])
+        # self.shape = np.array(self.data.shape)[[2,3,4,1]]
+        # self.shape[:3] = (self.bounds[:,1] - self.bounds[:,0]) // np.array(df)
 
-        self.positions = torch.tensor(self.positions.permute(2,1,0)).float()
+        
+        self.a_positions = positions[:,:,0]
+        self.positions = positions[:,:,1:]
         self.neurons = neurons
 
     def __len__(self):
@@ -236,10 +244,10 @@ class NeuroPALDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         
-        sample = self.data[idx,:,:,:,:]
+        sample = self.data[idx,:,:,:,:].permute([0,3,2,1])
         sample[sample<0] = 0
 
-        return sample,self.positions[:,:,idx]
+        return sample,idx
 
 
 

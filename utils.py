@@ -156,3 +156,26 @@ def sort_mu(ims,neurons=None,min_counts=2):
         col = col[idx,:]
     
     return N,col,pos,counts
+
+# %% helper functions for 3D quadratic basis and jacobian
+def quadratic_basis(P):
+    return torch.cat((P[...,0][...,None]*0,P,P*P,
+                      P[...,0][...,None]*P[...,1][...,None],
+                      P[...,0][...,None]*P[...,2][...,None],
+                      P[...,1][...,None]*P[...,2][...,None]),len(P.shape)-1)
+
+def quadratic_det_jac(B,P):
+    x,y,z = P[0][None,:],P[1][None,:],P[2][None,:]
+    
+    a = B[1,0][:,None]+2*B[4,0][:,None]*x+B[7,0][:,None]*y+B[9,0][:,None]*z
+    b = B[2,0][:,None]+2*B[5,0][:,None]*y+B[7,0][:,None]*x+B[8,0][:,None]*z
+    c = B[3,0][:,None]+2*B[6,0][:,None]*z+B[8,0][:,None]*y+B[9,0][:,None]*x
+    d = B[1,1][:,None]+2*B[4,1][:,None]*x+B[7,1][:,None]*y+B[9,1][:,None]*z
+    e = B[2,1][:,None]+2*B[5,1][:,None]*y+B[7,1][:,None]*x+B[8,1][:,None]*z
+    f = B[3,1][:,None]+2*B[6,1][:,None]*z+B[8,1][:,None]*y+B[9,1][:,None]*x
+    g = B[1,2][:,None]+2*B[4,2][:,None]*x+B[7,2][:,None]*y+B[9,2][:,None]*z
+    h = B[2,2][:,None]+2*B[5,2][:,None]*y+B[7,2][:,None]*x+B[8,2][:,None]*z
+    i = B[3,2][:,None]+2*B[6,2][:,None]*z+B[8,2][:,None]*y+B[9,2][:,None]*x
+    
+    det = a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g)
+    return det
