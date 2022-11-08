@@ -179,3 +179,47 @@ def quadratic_det_jac(B,P):
     
     det = a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g)
     return det
+
+
+# %%
+from scipy.spatial.transform import Rotation as R
+from scipy.io import loadmat
+
+import pyro.distributions as dist
+import pyro
+
+def simulate_worm_pc(atlas_file,info_file,n_sample):
+    '''Generate simulated samples of worm point clouds using an atlas file
+    '''
+    def sample(theta_l,theta_c,sigma_l,n_sample=n_sample):
+        with pyro.plate('neurons',theta_c.size(0)):
+            with pyro.plate('data',n_sample):
+                sample_c = pyro.sample('obs_c',dist.Dirichlet(theta_c))
+                sample_l = pyro.sample('obs_l',dist.MultivariateNormal(theta_l,sigma_l*torch.eye(3)))
+        return torch.cat((sample_l,sample_c),2).permute(0,2,1)
+    
+    content = loadmat(atlas_file,simplify_cells=True)
+    neurons = list(content['atlas']['tail']['N'])
+    mu = content['atlas']['tail']['model']['mu']
+    # sigma = content['atlas']['tail']['model']['sigma']
+
+    data = loadmat(info_file,simplify_cells=True)
+    neurons_body = list(set([neuron for ganglion in data['ganglia'][13:21] for neuron in ganglion['neurons']]))
+    neurons_body = neurons_body + ['PHSO1L', 'PHSO1R', 'AS10', 'DA7', 'VD11', 'VA11', 'PVPL', 'PVPR']
+
+    ganglia_body = [list(set([neuron for neuron in ganglion['neurons']])) for ganglion in data['ganglia'][13:]]
+    ganglia_body += [['AS10', 'DA7', 'VD11','VA11']]
+    ganglia_body += [['PHSO1R','PHSO1L']]
+        
+    tess = [[neurons.index(n) for n in ganglion if n in neurons] for ganglion in ganglia_body]
+    tess = [tess[4]+tess[0],tess[0]+tess[1],tess[1]+tess[2]+tess[3]+tess[5]]
+
+    theta_l=torch.tensor(mu[:,:3]).float()
+    theta_c=torch.tensor(sp.special.softmax(mu[:,3:]/50,axis=1)).float()
+    sigma_l=torch.ones((1)).float()
+    point_cloud = sample(theta_l,theta_c,sigma_l)
+    for i in range(point_cloud.shape[0]):
+        rot = torch.tensor(R.from_rotvec(np.array([0,0,np.random.randn()/3])).as_matrix()).float()
+        point_cloud[i,:3,:] = rot@point_cloud[i,:3,:]
+    
+    return point_cloud, tess

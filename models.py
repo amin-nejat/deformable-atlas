@@ -473,7 +473,7 @@ class PCPiecewiseRigid(nn.Module):
         a = aligned.permute(0,2,1)
         
         def my_lr(module_name, param_name):
-                return {"lr": lr/100.0} if param_name == 'theta_c' else {"lr": lr}
+            return {"lr": lr/100.0} if param_name == 'theta_c' else {"lr": lr}
 
         guide = pyro.infer.autoguide.AutoDelta(self.prior)
         pyro.clear_param_store()
@@ -558,7 +558,7 @@ class PCPiecewiseRigidNormal(PCPiecewiseRigid):
         a = aligned.permute(0,2,1)
         
         def my_lr(module_name, param_name):
-                return {"lr": lr/100.0} if param_name == 'theta_c' else {"lr": lr}
+            return {"lr": lr/100.0} if param_name == 'theta_c' else {"lr": lr}
 
         guide = pyro.infer.autoguide.AutoDelta(self.prior)
         pyro.clear_param_store()
@@ -626,7 +626,8 @@ def train_model(model,dataloader,optimizer,gamma_re=1,gamma_ss=0,gamma_mm=0,epoc
                 print('MM Regularization: ' + str(reg_mm))
         
         if (epoch+1) % epochs_theta == 0:
-            model.estimate_theta(X_t)
+            with torch.no_grad():
+                model.estimate_theta(X_t)
         
     return losses
     

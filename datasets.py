@@ -4,7 +4,6 @@ Created on Fri Feb 25 14:53:52 2022
 
 @author: Amin
 """
-from turtle import color
 from torch.utils.data import Dataset
 
 import torch.nn as nn
@@ -15,8 +14,8 @@ from scipy.io import loadmat
 import numpy as np
 
 import utils
-# import h5py
-# import os
+import h5py
+
 
 
 # %%
@@ -117,7 +116,7 @@ class PCImageDataset(Dataset):
 
         return sample,self.positions[:,:,idx]
 
-
+# %%
 class NeuroPALDataset(Dataset):
     @staticmethod
     def zscore(data):
@@ -156,14 +155,12 @@ class NeuroPALDataset(Dataset):
     @staticmethod
     def load_neuropal(file):
         """Load a NeuroPAL formatted file"""
-        content = loadmat(file,simplify_cells=True)
-
-        scale = content['info']['scale'].T
-        rgbw = content['info']['RGBW']
+        content = h5py.File(file)
+        scale = np.array(content['info_scale']).T
+        rgbw = np.array(content['info_RGBW']).squeeze().astype(int)
         
-        image = content['data'][:,:,:,rgbw-1].squeeze()
-        body = content['worm']['body'].lower()
-        return image, scale, body
+        image = content['data']
+        return image, scale, rgbw 
 
     @staticmethod
     def load_celegans_data(file):
@@ -188,22 +185,22 @@ class NeuroPALDataset(Dataset):
             neurons_body = neurons_body + ['PHSO1L', 'PHSO1R', 'AS10', 'DA7', 'VD11', 'VA11', 'PVPL', 'PVPR']
 
         
-        data_body = [NeuroPALDataset.zscore(NeuroPALDataset.load_neuropal(files_body[i][:-14]+'.mat')[0].astype(float)) for i in range(len(files_body))]
+        contents = [NeuroPALDataset.load_neuropal(files_body[i][:-14]+'.h5') for i in range(len(files_body))]
+        self.data_body = [a[0] for a in contents]
+        self.rgbws = [a[2] for a in contents]
 
         
-        sz = np.array([d.shape for d in data_body]).max(0)
+        sz = np.array([d.shape for d in self.data_body]).max(0)[::-1]
+        self.sz = sz
+        self.pads = []
+        for f in range(len(self.data_body)):
+            pads = [(0,(sz[i]-self.data_body[f].shape[::-1][i]).astype(int)) for i in range(4)]
+            self.pads.append(pads)
 
-        for f in range(len(data_body)):
-            pads = [(0,(sz[i]-data_body[f].shape[i]).astype(int)) for i in range(4)]
-            data_body[f] = np.pad(data_body[f],pads)
-
-        data_body = np.array(data_body).transpose([0,4,1,2,3])
-
-        avg = nn.AvgPool3d(kernel_size=df, stride=df)
+        self.avg = nn.AvgPool3d(kernel_size=df, stride=df)
 
         neurons,col,pos,_ = utils.sort_mu(ims_body,neurons_body,min_counts=len(ims_body))
         positions = torch.tensor(pos)/scales.T[None,:,:]
-
         
         self.bounds = torch.tensor([(positions[:,i].min()-margin[i],positions[:,i].max()+margin[i]) for i in range(3)]).int()
         self.bounds[:,0] = torch.maximum(self.bounds[:,0],torch.zeros(3))
@@ -211,32 +208,38 @@ class NeuroPALDataset(Dataset):
 
         positions -= self.bounds[:,0][None,:,None]
         positions /= np.array(df).astype(np.float32)[:,None]
+        positions = positions.float()
         
-        data = data_body.astype(np.float32)
-        data = data_body[:,:,self.bounds[0,0]:self.bounds[0,1],
-                              self.bounds[1,0]:self.bounds[1,1],
-                              self.bounds[2,0]:self.bounds[2,1]].astype(np.float32)
-        
-        
-        positions = positions[:,[2,1,0],:].float()
-        data = torch.tensor(data).float()
-
-        self.A = avg(data[0]).permute(0,3,2,1)
-        self.data = avg(data[1:])
-        
-        self.shape = np.array(self.data.shape[::-1][:-1])
-        # self.shape = np.array(self.data.shape)[[2,3,4,1]]
-        # self.shape[:3] = (self.bounds[:,1] - self.bounds[:,0]) // np.array(df)
-
-        
+        self.sz[:3] = np.diff(self.bounds).squeeze()
+        self.sz[:3] = self.sz[:3]/np.array(df)
+        self.sz[3] = len(self.rgbws[0])
         self.a_positions = positions[:,:,0]
         self.positions = positions[:,:,1:]
         self.neurons = neurons
-
+        self.shape = self.sz.tolist() + [len(self.data_body)-1]
+        
+        self.A = self.process(0)
+        
+    def process(self,idx):
+        data = NeuroPALDataset.zscore(
+            np.array(self.data_body[idx])[self.rgbws[idx]-1]
+        ).astype(np.float32).transpose([3,2,1,0])
+        data = np.pad(data,self.pads[idx])
+        
+        data = data[self.bounds[0,0]:self.bounds[0,1],
+                    self.bounds[1,0]:self.bounds[1,1],
+                    self.bounds[2,0]:self.bounds[2,1],:
+                 ]
+        
+        data = torch.tensor(data).float().permute(3,0,1,2)
+        data[data<0] = 0
+        data = self.avg(data)
+        return data
+        
     def __len__(self):
         '''Read out the size of the dataset.
         '''
-        return self.data.shape[0]
+        return self.shape[-1]
 
     def __getitem__(self,idx):
         '''Read a batch of images and corresponding point clouds indexed by idx.
@@ -244,8 +247,7 @@ class NeuroPALDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         
-        sample = self.data[idx,:,:,:,:].permute([0,3,2,1])
-        sample[sample<0] = 0
+        sample = self.process(idx+1)
 
         return sample,idx
 
@@ -304,3 +306,6 @@ class Image:
     def get_annotations(obj):
         """Getter of neuron annotations"""
         return [neuron.annotation for neuron in obj.neurons]
+    
+
+    
