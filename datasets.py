@@ -16,7 +16,9 @@ import numpy as np
 import utils
 import h5py
 
-
+import pandas
+from PIL import Image
+import glob
 
 # %%
 class PCDataset(Dataset):
@@ -50,6 +52,80 @@ class PCDataset(Dataset):
 
         return sample,idx
     
+    
+# %%
+class FlyWingDataset(Dataset):
+    '''Image dataset, to store and read image data in batches.
+    '''
+    def __init__(self,folder,pc_file,sex,genotype,side,device='cuda',margin=[100,100],df=[4,4]):
+        
+        table = pandas.read_csv(pc_file,sep='\t')
+        table = table.loc[
+            (table['sex'] == sex) & 
+            (table['genotype'] == genotype) &
+            (table['side'] == side)
+        ]
+        table = table.set_index('ID')
+        
+        file_name = genotype+'_'+sex+'_'+side
+        files = glob.glob(folder+file_name+'_lei_2X*')
+        ID = np.array([int(file.split('_')[-1][:-4]) for file in files])
+        files = [files[np.where(ID==i)[0][0]] for i in table.index]
+        
+        sz = np.array(np.array(Image.open(files[0])).shape[:2])
+
+        self.files = files
+        self.avg = nn.AvgPool2d(kernel_size=df, stride=df)
+        self.bounds = np.array([
+            [margin[0],sz[0]-margin[0]],
+            [margin[1],sz[1]-margin[1]]
+        ])
+        self.A = self.process(0)
+
+        
+        # /table['Scale']
+        pc = np.array([[
+            table['X'+str(i)],
+            table['Y'+str(i)]
+            ] for i in range(1,49)]).transpose([2,1,0])
+        # print(pc[0].T)
+        pc = 1000*pc[:,[1,0]]
+        pc[:,0] = -pc[:,0]
+        # pc = pc + sz[None,:,None]/2
+        # pc = .5*(1+pc)*sz[None,:,None]
+        # pc -= self.bounds[:,0][None,:,None]
+        pc /= np.array(df).astype(np.float32)[:,None]
+        self.pc = pc
+
+    def __len__(self):
+        '''Read out the size of the dataset.
+        '''
+        return len(self.files)-1
+    
+    def process(self,idx):
+        image = np.array(Image.open(self.files[idx])).astype(float)
+        image = 1-torch.tensor(image).float()/255
+        image = image[self.bounds[0][0]:self.bounds[0][1],
+                      self.bounds[1][0]:self.bounds[1][1],1]
+        image = self.avg(image[None,:,:])
+        image[image < 0] = 0
+        
+        return image[...,None]
+    
+    def __getitem__(self,idx):
+        '''Read a batch indexed by idx.
+        '''
+        
+        idx = idx+1
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        
+        image = self.process(idx)
+
+        return image,idx
+        
+        
+        
 # %%
 class ImageDataset(Dataset):
     '''Image dataset, to store and read image data in batches.
@@ -131,7 +207,7 @@ class NeuroPALDataset(Dataset):
     def load_neuropal_id(file):
         """Load NeuroPAL meta data"""
         content = loadmat(file,simplify_cells=True)['image']
-        im = Image(bodypart=content['bodypart'].lower(),scale=content['scale'])
+        im = NeuroPALImage(bodypart=content['bodypart'].lower(),scale=content['scale'])
         im.neurons = []
         for n in range(len(content['neurons'])):
             neuron = Neuron()
@@ -274,7 +350,7 @@ class Neuron:
         self.probabilistic_ids   = None # neuron IDs listed by descending probability
         self.probabilistic_probs = None # neuron ID probabilities
 
-class Image:
+class NeuroPALImage:
     """A list of neurons in a certain body part"""
 
     def __init__(self,bodypart,neurons=[],scale=np.ones((3))):

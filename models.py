@@ -112,7 +112,7 @@ class ImagePiecewiseRigid(nn.Module):
     '''
     def __init__(
             self,sz,A,mesh=[2,2,1],tess=None,nbs=None,
-            reg_pc=True,centers=None,positions=None,n_channels=4,std=10,device='cuda'
+            centers=None,positions=None,n_channels=4,std=10,device='cuda'
         ):
         super(ImagePiecewiseRigid, self).__init__()
         # Spatial transformer localization-network
@@ -185,7 +185,6 @@ class ImagePiecewiseRigid(nn.Module):
         r,t = self.rigid_t(torch.pi*T[:,:,:3], T[:,:,3:])
         
         grid = self.piecewise_flow(r,t)
-        if not self.volumetric: grid[:,:,:,:,2] = 0
         
         reg_ss = self.regularizer_ss(r,t,idx) if self.centers is not None else None
         reg_mm = self.regularizer(r,t)
@@ -222,6 +221,7 @@ class ImagePiecewiseRigid(nn.Module):
 
     
     def rigid_t(self,alpha,trans):
+        
         cos = torch.cos(alpha)
         sin = torch.sin(alpha)
         z = torch.zeros(alpha[:,:,0].shape).to(self.device)
@@ -244,11 +244,14 @@ class ImagePiecewiseRigid(nn.Module):
                          z,sin[:,:,2], cos[:,:,2])
                         ,2).view(b,t,3,3)
         
-        XYZ = torch.einsum('btmn,btnk,btks->btms',X,Y,Z)
+        XYZ = torch.einsum('btmn,btnk,btks->btms',X,Y,Z) if self.volumetric else X
         
         T = trans*self.sz[None,None,:]+\
             torch.einsum('m,bkmt->bkt',self.center,
                  torch.eye(3).to(self.device)[None,None,:,:]-XYZ)
+            
+        if not self.volumetric:  T[:,:,2] = 0
+            
         return XYZ, T
     
     def det_jac(self,x,pos):

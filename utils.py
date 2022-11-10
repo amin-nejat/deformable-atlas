@@ -223,3 +223,51 @@ def simulate_worm_pc(atlas_file,info_file,n_sample):
         point_cloud[i,:3,:] = rot@point_cloud[i,:3,:]
     
     return point_cloud, tess
+
+
+# %%
+from dipy.align.transforms import AffineTransform2D, RigidTransform2D, AffineTransform3D, RigidTransform3D
+from dipy.align.imaffine import AffineRegistration
+import ray
+
+
+@ray.remote
+def affine_register(fixed,moving,transform='rigid'):
+    affreg = AffineRegistration()
+    if transform == 'rigid':
+        if fixed.shape[2] == 1:
+            transform = RigidTransform2D()
+            fixed = fixed[:,:,0]
+            moving = moving[:,:,0]
+        else: 
+            transform = RigidTransform3D()
+    if transform == 'affine':
+        if fixed.shape[2] == 1: 
+            transform = AffineTransform2D()
+            fixed = fixed[:,:,0]
+            moving = moving[:,:,0]
+        else: 
+            transform = AffineTransform3D()
+    
+    affine = affreg.optimize(
+        fixed, moving, 
+        transform, params0=None
+    )
+
+    registered = affine.transform(moving)
+    
+    return registered
+
+def affine_atlas(A,dataloader,transform='rigid'):
+    refs = []
+    for batch_idx, data in enumerate(dataloader):
+        refs += [affine_register.remote(
+            A[0].numpy(),
+            data[0][0,0].numpy(),
+            transform
+        )]
+    registered = ray.get(refs)
+    
+    return np.array(registered)
+    
+    
