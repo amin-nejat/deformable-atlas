@@ -72,17 +72,27 @@ def visualize_image(data,p=None,c=None,names=None,olp=False,tol=1e-3,scale=1,mic
     plt.title(titlestr,fontsize=fontsize)
     if save:
         plt.savefig(file+'.png',format='png')
-        plt.savefig(file+'.pdf',format='pdf')
+        try: plt.savefig(file+'.pdf',format='pdf')
+        except: pass
         plt.close('all')
     else:
         plt.show()
         
 # %%
-def visualize_pc(aligned,atlas=None,names=None,title_str='',olp=False,fontsize=9,dotsize=30,save=False,file=None):
+def visualize_pc(
+        aligned,atlas=None,names=None,three_d=False,
+        title_str='',olp=False,fontsize=9,dotsize=30,
+        save=False,file=None
+    ):
     '''Visualize point clouds and atlases learned from them
     '''
     fig = plt.figure(figsize=(15,8))
-    ax = fig.add_subplot(111, projection='3d')
+    
+    
+    if three_d: 
+        ax = fig.add_subplot(111, projection='3d')
+    else:
+        ax = fig.gca()
     
     ax.set_title(title_str)
 
@@ -90,27 +100,54 @@ def visualize_pc(aligned,atlas=None,names=None,title_str='',olp=False,fontsize=9
         al = aligned[j].T
         c_j = al[:,3:6]
         c_j[c_j < 0] = 0
-        ax.scatter(al[:,0],al[:,1],al[:,2], s=10, c=c_j/c_j.max(),marker='.')
+        if three_d:
+            ax.scatter(al[:,0],al[:,1],al[:,2], s=10, c=c_j/c_j.max(),marker='.')
+        else:
+            ax.scatter(al[:,1],al[:,0], s=10, c=c_j/c_j.max(),marker='.')
         
     if atlas is not None:
         c = atlas[:,3:]
         c[c<0] = 0
         c = c/c.max()
-        ax.scatter(atlas[:,0],atlas[:,1],atlas[:,2], 
-               s=dotsize,edgecolor=c,facecolor='w',marker='o')
+        if three_d:
+            ax.scatter(
+                atlas[:,0],atlas[:,1],atlas[:,2], 
+                s=dotsize,edgecolor=c,facecolor='w',marker='o'
+            )
+        else:
+            ax.scatter(
+                atlas[:,1],atlas[:,0],s=dotsize,edgecolor=c,
+                facecolor='w',marker='o'
+            )
+            
         
         name_pos = optimal_label_positioning(atlas[:,:3],lambda_1=1,lambda_2=1,tol=1e-1) if olp else atlas[:,:3]
         if names is not None:
             for i in range(len(names)):
-                ax.text(name_pos[i,0],name_pos[i,1],name_pos[i,2],names[i],c=c[i,:])
-                ax.plot([name_pos[i,0], atlas[i,0]],
-                        [name_pos[i,1], atlas[i,1]],
-                        [name_pos[i,2], atlas[i,2]],
-                        color=c[i,:],linestyle='dotted',linewidth=1)
+                if three_d:
+                    ax.text(name_pos[i,0],name_pos[i,1],name_pos[i,2],names[i],c=c[i,:])
+                    ax.plot([name_pos[i,0], atlas[i,0]],
+                            [name_pos[i,1], atlas[i,1]],
+                            [name_pos[i,2], atlas[i,2]],
+                            color=c[i,:],linestyle='dotted',linewidth=1)
+                else:
+                    ax.text(name_pos[i,1],name_pos[i,0],names[i],c=c[i,:])
+                    ax.plot([name_pos[i,1], atlas[i,1]],
+                            [name_pos[i,0], atlas[i,0]],
+                            color=c[i,:],linestyle='dotted',linewidth=1)
+                    
+                    draw_ellipse(
+                        atlas[i,[1,0]],np.cov(aligned[:,[1,0],i].T),c[i],
+                        std_devs=1,ax=ax,line_width=1
+                    )
                 
     ax.dist=5
-    axis_equal_3d(ax)
-    ax.view_init(elev=20., azim=0)
+    if three_d: 
+        axis_equal_3d(ax)
+        ax.view_init(elev=20., azim=0)
+    else:
+        ax.axis('equal')
+    
     
     ax.axis('off')
     ax.set_facecolor('xkcd:light gray')
@@ -309,7 +346,6 @@ def visualize_t(atlas,a,b,titlestr='',fontsize=15,save=False,file=None):
     rejected,_ = multitest.fdrcorrection(p.flatten(),alpha=.05)
     rejected = np.array(rejected).reshape(p.shape).astype(float)
     rejected[atlas < 0.1] = 0
-    # rejected = (p<.05/t.size).astype(float)
     
     plt.imshow(atlas, cmap='gray')
     plt.imshow(t,alpha=rejected, cmap='viridis')
@@ -324,3 +360,24 @@ def visualize_t(atlas,a,b,titlestr='',fontsize=15,save=False,file=None):
     else:
         plt.show()
 
+
+# %%
+
+from scipy.stats import multivariate_normal
+
+def draw_ellipse(mean,covariance,colors,std_devs=3,ax=None,line_width=2):
+    '''sample grid that covers the range of points'''
+    min_p = mean - std_devs*np.sqrt(np.diag(covariance))
+    max_p = mean + std_devs*np.sqrt(np.diag(covariance))
+    
+    x = np.linspace(min_p[0],max_p[0],256) 
+    y = np.linspace(min_p[1],max_p[1],256)
+    X,Y = np.meshgrid(x,y)
+    
+    Z = multivariate_normal.pdf(np.stack((X.reshape(-1),Y.reshape(-1))).T, mean=mean, cov=(std_devs**2)*covariance)
+    Z = Z.reshape([len(x),len(y)])
+    
+    if ax is None:
+        plt.contour(X, Y, Z, 0,colors=colors,linewidth=line_width)
+    else:
+        ax.contour(X, Y, Z, 0,colors=colors,linewidths=line_width)

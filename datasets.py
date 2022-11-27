@@ -12,11 +12,12 @@ import torch
 from scipy.io import loadmat
 
 import numpy as np
+import scipy as sp
 
 import utils
 import h5py
 
-import pandas
+# import pandas
 from PIL import Image
 import glob
 
@@ -57,20 +58,10 @@ class PCDataset(Dataset):
 class FlyWingDataset(Dataset):
     '''Image dataset, to store and read image data in batches.
     '''
-    def __init__(self,folder,pc_file,sex,genotype,side,device='cuda',margin=[100,100],df=[4,4]):
-        
-        table = pandas.read_csv(pc_file,sep='\t')
-        table = table.loc[
-            (table['sex'] == sex) & 
-            (table['genotype'] == genotype) &
-            (table['side'] == side)
-        ]
-        table = table.set_index('ID')
+    def __init__(self,folder,sex,genotype,side,device='cuda',margin=[100,100],df=[4,4]):
         
         file_name = genotype+'_'+sex+'_'+side
         files = glob.glob(folder+file_name+'_lei_2X*')
-        ID = np.array([int(file.split('_')[-1][:-4]) for file in files])
-        files = [files[np.where(ID==i)[0][0]] for i in table.index]
         
         sz = np.array(np.array(Image.open(files[0])).shape[:2])
 
@@ -81,21 +72,7 @@ class FlyWingDataset(Dataset):
             [margin[1],sz[1]-margin[1]]
         ])
         self.A = self.process(0)
-
         
-        # /table['Scale']
-        pc = np.array([[
-            table['X'+str(i)],
-            table['Y'+str(i)]
-            ] for i in range(1,49)]).transpose([2,1,0])
-        # print(pc[0].T)
-        pc = 1000*pc[:,[1,0]]
-        pc[:,0] = -pc[:,0]
-        # pc = pc + sz[None,:,None]/2
-        # pc = .5*(1+pc)*sz[None,:,None]
-        # pc -= self.bounds[:,0][None,:,None]
-        pc /= np.array(df).astype(np.float32)[:,None]
-        self.pc = pc
 
     def __len__(self):
         '''Read out the size of the dataset.
@@ -104,7 +81,11 @@ class FlyWingDataset(Dataset):
     
     def process(self,idx):
         image = np.array(Image.open(self.files[idx])).astype(float)
-        image = 1-torch.tensor(image).float()/255
+        if len(image.shape) == 2: 
+            image = torch.tensor(image[:,:,None][:,:,[0,0]]).float()
+        else:
+            image = 1-torch.tensor(image).float()/255
+            
         image = image[self.bounds[0][0]:self.bounds[0][1],
                       self.bounds[1][0]:self.bounds[1][1],1]
         image = self.avg(image[None,:,:])
@@ -193,6 +174,64 @@ class PCImageDataset(Dataset):
         return sample,self.positions[:,:,idx]
 
 # %%
+class NeuroPALPC(Dataset):
+    def __init__(self,info,files,body,neurons=None):
+        data = NeuroPALDataset.load_celegans_data(info)
+        ims = [NeuroPALDataset.load_neuropal_id(file) for file in files]
+        
+        ims_body = [im for im in ims if im.bodypart == body]
+        scales = np.array([im.scale for im in ims_body])
+        
+        if body == 'head':
+            self.neurons = list(set([neuron for ganglion in data['ganglia'][:9] for neuron in ganglion['neurons']]))
+            self.neurons += ['AMSOL', 'AMSOR']
+            
+            self.ganglia = [list(set([neuron for neuron in ganglion['neurons']])) for ganglion in data['ganglia'][:9]]
+            self.ganglia += [['AMSOR','AMSOL']]
+
+        if body == 'tail':
+            self.neurons = list(set([neuron for ganglion in data['ganglia'][13:21] for neuron in ganglion['neurons']]))
+            self.neurons += ['PHSO1L', 'PHSO1R', 'AS10', 'DA7', 'VD11', 'VA11', 'PVPL', 'PVPR']
+            
+            self.ganglia = [list(set([neuron for neuron in ganglion['neurons']])) for ganglion in data['ganglia'][13:]]
+            self.ganglia += [['AS10', 'DA7', 'VD11','VA11']]
+            self.ganglia += [['PHSO1R','PHSO1L']]
+
+        if neurons is None:
+            self.neurons,col,pos,_ = utils.sort_mu(ims_body,self.neurons,min_counts=len(ims_body))
+        else:
+            self.neurons,col,pos,_ = utils.sort_mu(ims_body,neurons,min_counts=0)
+            
+        pos = pos*scales.T[None,:,:]
+        
+        tess = [[self.neurons.index(n) for n in ganglion if n in self.neurons] for ganglion in self.ganglia]
+        
+        # self.tessellation = tess
+        if body == 'head': 
+            self.tessellation = [tess[0]+tess[1]+tess[2]+tess[3]+tess[4],tess[4]+tess[5]+tess[6]+tess[7],tess[7]+tess[8]]
+        if body == 'tail': 
+            self.tessellation = [tess[4]+tess[0],tess[0]+tess[1],tess[1]+tess[2]+tess[3]+tess[5]]
+        
+        self.mask = 1-np.eye(len(self.tessellation))
+        # self.point_cloud = np.hstack((pos,sp.special.softmax(col[:,:3,:],axis=1))).transpose([2,1,0])
+        
+        self.point_cloud = np.hstack((pos,col[:,:3,:])).transpose([2,1,0])
+        
+        self.A = self.point_cloud[0]
+        
+        self.sz = torch.tensor([pos[:,i,:].max() for i in range(3)])
+        
+    def __len__(self):
+        '''Read out the size of the dataset.
+        '''
+        return self.point_cloud.shape[0]
+  
+    def __getitem__(self,idx):
+        '''Read a batch of images and corresponding point clouds indexed by idx.
+        '''
+        return torch.tensor(self.point_cloud[idx]).float(),idx
+    
+# %%
 class NeuroPALDataset(Dataset):
     @staticmethod
     def zscore(data):
@@ -243,30 +282,47 @@ class NeuroPALDataset(Dataset):
         content = loadmat(file,simplify_cells=True)
         return content
 
-    def __init__(self,info,files,body,df=[1,1,1],margin=[10,10,3]):
+    def __init__(
+            self,info,files,body,neurons=None,
+            df=[1,1,1],margin=[10,10,3],
+            atlas=None,atlas_order=[1,0,2]
+        ):
+        
         data = NeuroPALDataset.load_celegans_data(info)
         ims = [NeuroPALDataset.load_neuropal_id(file) for file in files]
-
+        
         ims_body = [im for im in ims if im.bodypart == body]
         files_body = [files[i] for i in range(len(files)) if ims[i].bodypart == body]
         scales = np.array([im.scale for im in ims_body])
 
 
         if body == 'head':
-            neurons_body = list(set([neuron for ganglion in data['ganglia'][:9] for neuron in ganglion['neurons']]))
-            neurons_body = neurons_body + ['AMSOL', 'AMSOR']
+            self.neurons = list(set([neuron for ganglion in data['ganglia'][:9] for neuron in ganglion['neurons']]))
+            self.neurons += ['AMSOL', 'AMSOR']
 
         if body == 'tail':
-            neurons_body = list(set([neuron for ganglion in data['ganglia'][13:21] for neuron in ganglion['neurons']]))
-            neurons_body = neurons_body + ['PHSO1L', 'PHSO1R', 'AS10', 'DA7', 'VD11', 'VA11', 'PVPL', 'PVPR']
-
+            self.neurons = list(set([neuron for ganglion in data['ganglia'][13:21] for neuron in ganglion['neurons']]))
+            self.neurons += ['PHSO1L', 'PHSO1R', 'AS10', 'DA7', 'VD11', 'VA11', 'PVPL', 'PVPR']
         
+        
+        if neurons is None:
+        	self.neurons,col,pos,_ = utils.sort_mu(ims_body,self.neurons,min_counts=len(ims_body))
+        else:
+        	self.neurons,col,pos,_ = utils.sort_mu(ims_body,neurons,min_counts=len(ims_body))
+            
+
         contents = [NeuroPALDataset.load_neuropal(files_body[i][:-14]+'.h5') for i in range(len(files_body))]
         self.data_body = [a[0] for a in contents]
         self.rgbws = [a[2] for a in contents]
-
         
         sz = np.array([d.shape for d in self.data_body]).max(0)[::-1]
+        
+        if atlas is not None:
+            atlas = NeuroPALDataset.load_celegans_data(atlas)['atlas']
+            neurons_atlas = atlas[body]['N'].tolist()
+            idx = [neurons_atlas.index(n) for n in self.neurons]
+            a_positions = atlas[body]['model']['mu'][idx,atlas_order]/ims_body[0].scale
+
         self.sz = sz
         self.pads = []
         for f in range(len(self.data_body)):
@@ -274,11 +330,11 @@ class NeuroPALDataset(Dataset):
             self.pads.append(pads)
 
         self.avg = nn.AvgPool3d(kernel_size=df, stride=df)
-
-        neurons,col,pos,_ = utils.sort_mu(ims_body,neurons_body,min_counts=len(ims_body))
+        
         positions = torch.tensor(pos)/scales.T[None,:,:]
         
-        self.bounds = torch.tensor([(positions[:,i].min()-margin[i],positions[:,i].max()+margin[i]) for i in range(3)]).int()
+        # self.bounds = torch.tensor([(positions[:,i].min()-margin[i],positions[:,i].max()+margin[i]) for i in range(3)]).int()
+        self.bounds = torch.tensor([(0,sz[i]) for i in range(3)])
         self.bounds[:,0] = torch.maximum(self.bounds[:,0],torch.zeros(3))
         self.bounds[:,1] = torch.minimum(self.bounds[:,1],torch.tensor(sz[:3].copy()))
 
@@ -289,13 +345,19 @@ class NeuroPALDataset(Dataset):
         self.sz[:3] = np.diff(self.bounds).squeeze()
         self.sz[:3] = self.sz[:3]/np.array(df)
         self.sz[3] = len(self.rgbws[0])
-        self.a_positions = positions[:,:,0]
         self.positions = positions[:,:,1:]
-        self.neurons = neurons
         self.shape = self.sz.tolist() + [len(self.data_body)-1]
         
         self.A = self.process(0)
         
+        if atlas is None: 
+            self.a_positions = positions[:,:,0]
+        else:
+            sz_ = np.array(self.A.shape[1:])
+            a_positions /= np.array(df).astype(np.float32)
+            a_positions = a_positions - a_positions.mean(0) + sz_/2
+            self.a_positions = torch.tensor(a_positions).float()
+            
     def process(self,idx):
         data = NeuroPALDataset.zscore(
             np.array(self.data_body[idx])[self.rgbws[idx]-1]
