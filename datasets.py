@@ -73,6 +73,10 @@ class FlyWingDataset(Dataset):
         ])
         self.A = self.process(0)
         
+        self.shape = list(self.A.shape[1:]) + [self.A.shape[0]] + [len(self.files)-1]
+        self.a_positions = None
+        self.positions = None
+        
 
     def __len__(self):
         '''Read out the size of the dataset.
@@ -175,7 +179,8 @@ class PCImageDataset(Dataset):
 
 # %%
 class NeuroPALPC(Dataset):
-    def __init__(self,info,files,body,neurons=None):
+    def __init__(self,info,files,body,neurons=None,grouping='ganglion_set'):
+        # grouping: ganglion, full, ganglion_set
         data = NeuroPALDataset.load_celegans_data(info)
         ims = [NeuroPALDataset.load_neuropal_id(file) for file in files]
         
@@ -206,19 +211,21 @@ class NeuroPALPC(Dataset):
         
         tess = [[self.neurons.index(n) for n in ganglion if n in self.neurons] for ganglion in self.ganglia]
         
-        # self.tessellation = tess
-        if body == 'head': 
-            self.tessellation = [tess[0]+tess[1]+tess[2]+tess[3]+tess[4],tess[4]+tess[5]+tess[6]+tess[7],tess[7]+tess[8]]
-        if body == 'tail': 
-            self.tessellation = [tess[4]+tess[0],tess[0]+tess[1],tess[1]+tess[2]+tess[3]+tess[5]]
-        
-        self.mask = 1-np.eye(len(self.tessellation))
-        # self.point_cloud = np.hstack((pos,sp.special.softmax(col[:,:3,:],axis=1))).transpose([2,1,0])
-        
+        if grouping == 'ganglion':
+            self.tessellation = tess
+            self.mask = 1-np.eye(len(self.tessellation))
+        if grouping == 'full':
+            self.tessellation = None
+            self.mask = None
+        if grouping == 'ganglion_set':
+            if body == 'head': 
+                self.tessellation = [tess[0]+tess[1]+tess[2]+tess[3]+tess[4],tess[4]+tess[5]+tess[6]+tess[7],tess[7]+tess[8]]
+            if body == 'tail': 
+                self.tessellation = [tess[4]+tess[0],tess[0]+tess[1],tess[1]+tess[2]+tess[3]+tess[5]]
+            self.mask = 1-np.eye(len(self.tessellation))
+       
         self.point_cloud = np.hstack((pos,col[:,:3,:])).transpose([2,1,0])
-        
         self.A = self.point_cloud[0]
-        
         self.sz = torch.tensor([pos[:,i,:].max() for i in range(3)])
         
     def __len__(self):

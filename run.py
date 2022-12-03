@@ -36,11 +36,12 @@ if __name__ == '__main__':
     '''Read the arguments and run given the configuration in args
     '''
     args = get_args()
+    args.output += os.path.split(args.config)[1][:-5]+'/'
     if not os.path.exists(args.output): os.makedirs(args.output)
     with open(args.config, 'r') as stream: config = yaml.safe_load(stream)
     
     train_params = config['train_params']
-    if 'folder' in train_params.keys():
+    if config['dataset'] == 'NeuroPALDataset':
         files = glob.glob(train_params['folder']+'*_STRUCT.mat')
         train_params['files'] = files
         train_params.pop('folder')
@@ -76,7 +77,7 @@ if __name__ == '__main__':
     optimizer = optim.Adam(model.parameters(), lr=optimization_params['lr'] )
     optimization_params.pop('lr')
     
-    train_loss = models.train_model(
+    train_loss,atlases = models.train_model(
         model,trainloader,optimizer,
         save=True,file=args.output+'model.torch',
         **optimization_params
@@ -84,7 +85,7 @@ if __name__ == '__main__':
     
     # %%
     test_params = config['test_params']
-    if 'folder' in test_params.keys():
+    if config['dataset'] == 'NeuroPALDataset':
         files = glob.glob(test_params['folder']+'*_STRUCT.mat')
         test_params['files'] = files
         test_params.pop('folder')
@@ -98,16 +99,17 @@ if __name__ == '__main__':
     # %%
     if 'visualize_image' in config['visualizations']:
         unregistered,registered,jac,test_loss,test_reg_ss = prediction
-        np.savetxt(args.output+'loss.txt',[train_loss,test_loss])
+        save_loss = test_reg_ss if len(test_reg_ss) > 0 else test_loss
+        np.savetxt(args.output+'loss.txt',[save_loss])
         
         visualization.visualize_image(
             registered.transpose(0,1,2,3,4)[:,:,:,:3].mean(4),
             titlestr='Registered',
             scale=1,
             microns=.2,
-            p=dataset.a_positions[:,[0,1,2]].numpy(),
-            c=dataset.a_positions.numpy()*0,
-            names=dataset.neurons,
+            p=dataset.a_positions[:,[0,1,2]].numpy() if dataset.a_positions is not None else None,
+            c=dataset.a_positions.numpy()*0 if dataset.a_positions is not None else None,
+            names=dataset.neurons if hasattr(dataset, 'neurons') else None,
             olp=False,
             save=True,file=args.output+'registered'
         )
@@ -117,12 +119,18 @@ if __name__ == '__main__':
             titlestr='Unregistered',
             scale=1,
             microns=.2,
-            p=dataset.a_positions[:,[0,1,2]].numpy(),
-            c=dataset.a_positions.numpy()*0,
-            names=dataset.neurons,
+            p=dataset.a_positions[:,[0,1,2]].numpy() if dataset.a_positions is not None else None,
+            c=dataset.a_positions.numpy()*0 if dataset.a_positions is not None else None,
+            names=dataset.neurons if hasattr(dataset, 'neurons') else None,
             olp=False,
             save=True,file=args.output+'unregistered'
         )
+        
+        visualization.visualize_subjects(
+            [a.transpose(1,2,3,0) for a in atlases], ['Iter ' + str(i) for i in range(len(atlases))],
+            save=True,file=args.output+'atlases'
+        )
+
         
     if 'visualize_pc' in config['visualizations']:
         visualization.visualize_pc(

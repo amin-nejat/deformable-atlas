@@ -274,20 +274,23 @@ class ImagePiecewiseRigid(nn.Module):
         
         registered = np.zeros(list(testloader.dataset.shape))
         unregistered = np.zeros(list(testloader.dataset.shape))
-
+        shape = list(testloader.dataset.shape)
+        jac = np.zeros(shape[:3]+shape[4:])
         bs = testloader.batch_size
         
         for batch_idx, data in enumerate(testloader):
             with torch.no_grad():
                 x_t,flow,reg_ss,reg_mm = self(data[0].to(self.device),data[1])
                 test_loss.append(self.observation_loss(x_t).item())
-                test_reg_ss.append(reg_ss.mean().item())
+                if reg_ss is not None: test_reg_ss.append(reg_ss.mean().item())
                 
                 x_t = x_t.detach().cpu().numpy()
                 registered[:,:,:,:,batch_idx*bs:batch_idx*bs+x_t.shape[0]] = np.transpose(x_t,[2,3,4,1,0])
                 unregistered[:,:,:,:,batch_idx*bs:batch_idx*bs+x_t.shape[0]] = np.transpose(data[0],[2,3,4,1,0])
-                
-                jac = self.det_jac(data[0].to(self.device),data[1])
+                jac_ = self.det_jac(data[0].to(self.device),data[1])
+                jac_ = jac_.detach().cpu().numpy()
+
+                jac[:,:,:,batch_idx*bs:batch_idx*bs+jac_.shape[0]] = np.transpose(jac_,[1,2,3,0])
                 
 
         return unregistered,registered,jac,test_loss,test_reg_ss
@@ -472,7 +475,7 @@ class PCPiecewiseRigid(nn.Module):
         X_t[:,3:,:] = z_c
         
         reg = self.regularizer(X_t)
-        return X_t,None,reg,None
+        return X_t,None,None,reg
     
     def rigid_t(self,alpha,trans):
         cos = torch.cos(alpha)
@@ -524,7 +527,8 @@ class PCPiecewiseRigid(nn.Module):
         for batch_idx, data in enumerate(testloader):
             with torch.no_grad():
                 x_t,_,reg_ss,reg_mm = self(data[0].to(self.device),data[1])
-                test_reg_ss.append(reg_ss.mean().item())
+                
+                test_reg_ss.append(((x_t[:,:3]-self.A[:3])**2).sum(1).mean().item())
                 aligned[batch_idx*bs:batch_idx*bs+x_t.shape[0],:,:] = x_t.detach().cpu()
                 test_loss.append(self.observation_loss(x_t).item())
             
@@ -703,7 +707,7 @@ def train_model(
             loss.backward()
             optimizer.step()
             
-            losses.append(loss)
+            losses.append(loss.item())
             
             if batch_idx % 10 == 0:
                 print('Recon: ' + str(recon))

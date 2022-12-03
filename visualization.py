@@ -46,11 +46,28 @@ def visualize_3d(data,p=None,c=None,factor=2,save=False,file=None):
         
         
 # %%
-def visualize_image(data,p=None,c=None,names=None,olp=False,tol=1e-3,scale=1,microns=1,titlestr='',fontsize=12,save=False,file=None,factor=5):
+def visualize_image(
+        data,t_stat=None,
+        p=None,c=None,names=None,olp=False,tol=1e-3,
+        scale=1,microns=1,titlestr='',fontsize=12,factor=5,
+        save=False,file=None
+    ):
     '''Visualize 2d max projected image along with corresponding point clouds
     '''
     plt.figure(figsize=(18,9))
-    plt.imshow(factor*data.max(2)/data.max())
+    if t_stat is None:
+        plt.imshow(factor*data.max(2)/data.max())
+    else:
+        norm_t_stat = (t_stat-t_stat.min())/((t_stat.max()-t_stat.min()))
+        plt.imshow(factor*data.max(2)/data.max())
+        img = plt.imshow(
+            norm_t_stat.squeeze(), 
+            alpha=norm_t_stat.squeeze(),
+            cmap='jet',
+        )
+        ax = plt.gca()
+        plt.colorbar(img,ax=ax)
+
     
     if p is not None:
         c[c<0] = 0
@@ -260,7 +277,11 @@ def visualize_subjects(imgs_,titles,cmap='gray',save=False,file=None):
     plt.figure(figsize=(n*6,m*5))
     for i in range(len(imgs_)):
         plt.subplot(m,n,i+1)
-        plt.imshow(imgs_[i].mean(2),cmap=cmap)
+        im = imgs_[i].mean(2)
+        if len(im.shape) == 3:
+            plt.imshow(3*im[:,:,:3]/im[:,:,:3].max())
+        else:
+            plt.imshow(im,cmap=cmap)
         plt.title(titles[i])
         plt.axis('off')
     if save:
@@ -303,18 +324,40 @@ def plot_loss(losses,labels=None,titlestr='',fontsize=12,yscale='log',save=False
         plt.show()
         
 # %%
-def plot_bar(val,fontsize=12,titlestr='',ylabel='',ticks=None,save=False,file=None):
+def plot_bar(val,cmp,gp_names=['1','2'],fontsize=12,titlestr='',ylabel='',ticks=None,save=False,file=None):
     '''Bar plots for comparing a statistic across different groups.
     '''
-    plt.figure(figsize=(len(val)*2,5))
-    colors = plt.cm.hsv(np.linspace(0,1,len(val)+1)[0:-1])[:,0:3]
-    ax = plt.boxplot(val,patch_artist=True)
+    plt.figure(figsize=(len(val)*1.6,5))
+    # colors = plt.cm.hsv(np.linspace(0,1,len(val)+1)[0:-1])[:,0:3]
+    barwidth = .3
+    plt.bar(
+        np.arange(1,len(val)+1)-barwidth/2, 
+        np.array(val).mean(1), 
+        width = barwidth, 
+        color = 'blue', 
+        edgecolor = 'black', 
+        yerr=np.array(val).std(1)/np.sqrt(len(val)), 
+        capsize=7, label=gp_names[0]
+    )
     
-    for i in range(len(ax['boxes'])):
-        ax['boxes'][i].set(facecolor=colors[i])
+    plt.bar(
+        np.arange(1,len(cmp)+1)+barwidth/2, 
+        np.array(cmp).mean(1), 
+        width = barwidth, 
+        color = 'cyan', 
+        edgecolor = 'black', 
+        yerr=np.array(cmp).std(1)/np.sqrt(len(cmp)), 
+        capsize=7, label=gp_names[1]
+    )
+    
+    plt.legend()
+
+    # ax = plt.boxplot(val,patch_artist=True)
+    # for i in range(len(ax['boxes'])):
+    #     ax['boxes'][i].set(facecolor=colors[i])
 
     plt.xticks(np.arange(1,len(val)+1),ticks,fontsize=fontsize)
-    plt.grid('on')
+    # plt.grid('on')
     plt.title(titlestr,fontsize=fontsize)
     plt.ylabel(ylabel,fontsize=fontsize)
     plt.xticks(fontsize=fontsize)
