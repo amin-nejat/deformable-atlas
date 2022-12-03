@@ -17,6 +17,7 @@ import visualization
 from torch.utils.data import DataLoader
 import torch.optim as optim
 
+import torch
 import argparse
 import yaml
 
@@ -83,6 +84,8 @@ if __name__ == '__main__':
         **optimization_params
     )
     
+    # train_prediction = model.predict(trainloader)
+    
     # %%
     test_params = config['test_params']
     if config['dataset'] == 'NeuroPALDataset':
@@ -93,12 +96,34 @@ if __name__ == '__main__':
     testdataset = eval('datasets.'+config['dataset'])(
         **test_params
     )
+    
+    if config['model'][:2] == 'PC':
+        test_model = eval('models.'+config['model'])(
+            A=testdataset.A,sz=testdataset.sz,
+            tess=testdataset.tessellation,
+            mask=testdataset.mask,
+            **model_params
+        )
+
+
+    if config['model'][:5] == 'Image':
+        test_model = eval('models.'+config['model'])(
+            sz=testdataset.shape[:3],
+            A=testdataset.A,
+            centers=testdataset.a_positions,
+            positions=testdataset.positions,
+            **model_params
+        )
+
+    test_model.load_state_dict(torch.load(args.output+'model.torch'))
+
+
     testloader = DataLoader(testdataset , batch_size=1, shuffle=False, num_workers=0)
-    prediction = model.predict(testloader)
+    test_prediction = test_model.predict(testloader)
     
     # %%
     if 'visualize_image' in config['visualizations']:
-        unregistered,registered,jac,test_loss,test_reg_ss = prediction
+        unregistered,registered,jac,test_loss,test_reg_ss = test_prediction
         save_loss = test_reg_ss if len(test_reg_ss) > 0 else test_loss
         np.savetxt(args.output+'loss.txt',[save_loss])
         
@@ -138,7 +163,7 @@ if __name__ == '__main__':
             save=True,file=args.output+'unregistered'
         )
 
-        test_aligned, _, test_loss = prediction
+        test_aligned, _, test_loss = test_prediction
         train_aligned, _, train_loss = model.predict(trainloader)
         
         visualization.visualize_pc(

@@ -317,7 +317,7 @@ class NeuroPALDataset(Dataset):
         else:
         	self.neurons,col,pos,_ = utils.sort_mu(ims_body,neurons,min_counts=len(ims_body))
             
-
+                
         contents = [NeuroPALDataset.load_neuropal(files_body[i][:-14]+'.h5') for i in range(len(files_body))]
         self.data_body = [a[0] for a in contents]
         self.rgbws = [a[2] for a in contents]
