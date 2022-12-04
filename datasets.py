@@ -301,6 +301,7 @@ class NeuroPALDataset(Dataset):
         ims_body = [im for im in ims if im.bodypart == body]
         files_body = [files[i] for i in range(len(files)) if ims[i].bodypart == body]
         scales = np.array([im.scale for im in ims_body])
+        self.scales = scales
 
 
         if body == 'head':
@@ -328,7 +329,7 @@ class NeuroPALDataset(Dataset):
             atlas = NeuroPALDataset.load_celegans_data(atlas)['atlas']
             neurons_atlas = atlas[body]['N'].tolist()
             idx = [neurons_atlas.index(n) for n in self.neurons]
-            a_positions = atlas[body]['model']['mu'][idx,atlas_order]/ims_body[0].scale
+            a_positions = atlas[body]['model']['mu'][idx][:,atlas_order]/ims_body[0].scale
 
         self.sz = sz
         self.pads = []

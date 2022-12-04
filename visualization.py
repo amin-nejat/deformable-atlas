@@ -269,7 +269,7 @@ def next_slice(ax):
 
 
 # %%
-def visualize_subjects(imgs_,titles,cmap='gray',save=False,file=None):
+def visualize_subjects(imgs_,titles,cmap='gray',factor=1,save=False,file=None):
     '''Visualize multiple images in subplots.
     '''
     m = int(np.sqrt(len(imgs_)))
@@ -279,7 +279,7 @@ def visualize_subjects(imgs_,titles,cmap='gray',save=False,file=None):
         plt.subplot(m,n,i+1)
         im = imgs_[i].mean(2)
         if len(im.shape) == 3:
-            plt.imshow(3*im[:,:,:3]/im[:,:,:3].max())
+            plt.imshow(factor*im[:,:,:3]/im[:,:,:3].max())
         else:
             plt.imshow(im,cmap=cmap)
         plt.title(titles[i])

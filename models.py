@@ -281,7 +281,6 @@ class ImagePiecewiseRigid(nn.Module):
         for batch_idx, data in enumerate(testloader):
             with torch.no_grad():
                 x_t,flow,reg_ss,reg_mm = self(data[0].to(self.device),data[1])
-                print(reg_ss)
                 test_loss.append(self.observation_loss(x_t).item())
                 if reg_ss is not None: test_reg_ss.append(reg_ss.mean().item())
                 
