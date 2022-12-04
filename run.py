@@ -130,6 +130,7 @@ if __name__ == '__main__':
         visualization.visualize_image(
             registered.transpose(0,1,2,3,4)[:,:,:,:3].mean(4),
             titlestr='Registered',
+            factor=2,
             scale=1,
             microns=.2,
             p=dataset.a_positions[:,[0,1,2]].numpy() if dataset.a_positions is not None else None,
@@ -142,6 +143,7 @@ if __name__ == '__main__':
         visualization.visualize_image(
             unregistered.transpose(0,1,2,3,4)[:,:,:,:3].mean(4),
             titlestr='Unregistered',
+            factor=2,
             scale=1,
             microns=.2,
             p=dataset.a_positions[:,[0,1,2]].numpy() if dataset.a_positions is not None else None,
