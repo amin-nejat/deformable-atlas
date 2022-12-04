@@ -49,6 +49,7 @@ def visualize_3d(data,p=None,c=None,factor=2,save=False,file=None):
 def visualize_image(
         data,t_stat=None,
         p=None,c=None,names=None,olp=False,tol=1e-3,
+        xlim=None,ylim=None,
         scale=1,microns=1,titlestr='',fontsize=12,factor=5,
         save=False,file=None
     ):
@@ -81,6 +82,8 @@ def visualize_image(
                 plt.text(pos[n,1],pos[n,0],names[n],color='w',fontsize=fontsize)
                 plt.plot([pos[n,1], P[n,1]],[pos[n,0], P[n,0]],color='w',linestyle='dotted',linewidth=1)
 
+    if xlim is not None: plt.xlim(xlim)
+    if ylim is not None: plt.ylim(ylim)
     
     plt.axis('off')
     scalebar = ScaleBar(microns,'um')
