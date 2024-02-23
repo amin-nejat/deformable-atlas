@@ -6,7 +6,6 @@ Created on Mon Feb 14 19:03:38 2022
 """
 # %%
 import matplotlib.pyplot as plt
-from matplotlib_scalebar.scalebar import ScaleBar
 
 import numpy as np
 import scipy as sp
@@ -86,7 +85,6 @@ def visualize_image(
     if ylim is not None: plt.ylim(ylim)
     
     plt.axis('off')
-    scalebar = ScaleBar(microns,'um')
     plt.gca().add_artist(scalebar)
     
     plt.title(titlestr,fontsize=fontsize)
