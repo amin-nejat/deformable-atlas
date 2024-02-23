@@ -5,6 +5,9 @@ Created on Fri Feb 25 14:53:52 2022
 @author: Amin
 """
 # %%
+import sys
+sys.path.insert(1,'../codes')
+
 import torch.nn as nn
 import torch
 
