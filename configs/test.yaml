@@ -1,0 +1,22 @@
+# In progress ...
+
+# Parameters used for loading the trainig dataset
+train_params:
+
+# Parameters used for loading the testing dataset
+test_params:
+
+# Parameters used for the model (motion, atlas distributions, etc.)
+model_params:
+
+# Parameters used for running the optimization
+optimization_params:
+  optimizer:
+    type: Adam
+    step_size: 0.0001
+
+# Visuzliations
+visualizations:
+  - visualize_pc
+
+  

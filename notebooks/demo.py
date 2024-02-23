@@ -31,7 +31,7 @@ gamma_mm=0 # motion regularization weight in the loss
 epochs=20 # number of training epochs
 epochs_theta=10 # number of training epochs before each update of atlas
 
-# Loading the worm atlas and sampling points from it by rotations
+# %% Loading the worm atlas and sampling points from it by rotations
 point_cloud, tess = utils.simulate_worm_pc(
     'data/atlas_xx_rgb',
     'data/male_data',

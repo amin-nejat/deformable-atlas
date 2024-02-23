@@ -24,7 +24,7 @@ import os
 def get_args():
     '''Parsing the arguments when this file is called from console
     '''
-    parser = argparse.ArgumentParser(description='Runner for CSLDS',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(description='Runner for Deformable Atlas',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--config', '-c', metavar='Configuration',help='Configuration file address',default='/')
     parser.add_argument('--output', '-o', metavar='Output',help='Folder to save the output and results',default='/')
     
