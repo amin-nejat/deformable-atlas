@@ -1,5 +1,5 @@
-# Learning Probabilistic Piecewise Rigid Atlases of Model Organisms via Generative Deep Networks
-![Learning Probabilistic Piecewise Rigid Atlases of Model Organisms via Generative Deep Networks](https://github.com/amin-nejat/deformable-atlas/assets/5959554/960a5935-6df9-4423-b71a-fd2bf97ef412)
+# Learning Probabilistic Piecewise Rigid Atlases of Model Organisms
+![Learning Probabilistic Piecewise Rigid Atlases of Model Organisms](https://github.com/amin-nejat/deformable-atlas/assets/5959554/960a5935-6df9-4423-b71a-fd2bf97ef412)
 
 Atlases are crucial to imaging statistics as they enable the standardization of inter-subject and inter-population analyses. While existing atlas estimation methods based on fluid/elastic/diffusion registration yield high-quality results for the human brain, these deformation models do not extend to a variety of other challenging areas of neuroscience such as the anatomy of C. elegans worms and fruit flies. To this end, this work presents a general probabilistic deep network-based framework for atlas estimation and registration which can flexibly incorporate various deformation models and levels of keypoint supervision that can be applied to a wide class of model organisms.
 
