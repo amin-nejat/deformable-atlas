@@ -4,10 +4,7 @@ Created on Sat Nov 26 20:12:40 2022
 
 @author: Amin
 """
-
-import sys
-sys.path.insert(1, '../codes')
-
+# %%
 import glob
 
 import datasets

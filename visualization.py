@@ -4,19 +4,19 @@ Created on Mon Feb 14 19:03:38 2022
 
 @author: Amin
 """
-
-from matplotlib_scalebar.scalebar import ScaleBar
-from scipy.optimize import minimize
+# %%
 import matplotlib.pyplot as plt
-from scipy import stats
+from matplotlib_scalebar.scalebar import ScaleBar
+
 import numpy as np
 import scipy as sp
 
+from scipy import stats
+from scipy.optimize import minimize
 # %%
 def visualize_3d(data,p=None,c=None,factor=2,save=False,file=None):
     '''Visualize volumetric image by max projecting on xy, yz, zx.
     '''
-    
     orders = [[2,1,0],[0,1,2],[2,0,1]]
     if c is not None:
         c[c<0] = 0
@@ -355,12 +355,7 @@ def plot_bar(val,cmp,gp_names=['1','2'],fontsize=12,titlestr='',ylabel='',ticks=
     
     plt.legend()
 
-    # ax = plt.boxplot(val,patch_artist=True)
-    # for i in range(len(ax['boxes'])):
-    #     ax['boxes'][i].set(facecolor=colors[i])
-
     plt.xticks(np.arange(1,len(val)+1),ticks,fontsize=fontsize)
-    # plt.grid('on')
     plt.title(titlestr,fontsize=fontsize)
     plt.ylabel(ylabel,fontsize=fontsize)
     plt.xticks(fontsize=fontsize)

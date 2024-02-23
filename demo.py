@@ -4,17 +4,19 @@ Created on Mon Mar  7 19:41:57 2022
 
 @author: Amin
 """
-from torch.utils.data import DataLoader
 
-import torch.optim as optim
-import numpy as np
-
+# %%
 import torch
 
 import visualization
 import datasets
 import models
 import utils
+
+import torch.optim as optim
+import numpy as np
+
+from torch.utils.data import DataLoader
 
 # %%
 device = 'cuda'

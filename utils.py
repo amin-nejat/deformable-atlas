@@ -4,11 +4,21 @@ Created on Fri Feb 11 12:30:50 2022
 
 @author: Amin
 """
+# %%
 import numpy as np
 import scipy as sp
 import torch
 import cv2
 
+from scipy.spatial.transform import Rotation as R
+from scipy.io import loadmat
+
+import pyro.distributions as dist
+import pyro
+
+from dipy.align.transforms import AffineTransform2D, RigidTransform2D, AffineTransform3D, RigidTransform3D
+from dipy.align.imaffine import AffineRegistration
+import ray
 # %%
 def image_iwarp(im,flow,grid):
     '''Inverting a warping operation.
@@ -25,7 +35,6 @@ def image_warp(im, flow):
     '''
     
     return cv2.remap(im.numpy(), flow.astype(np.float32), None, cv2.INTER_NEAREST)[:,:,None]
-
 
 # %%
 def rgb2hsv(rgb):
@@ -182,12 +191,6 @@ def quadratic_det_jac(B,P):
 
 
 # %%
-from scipy.spatial.transform import Rotation as R
-from scipy.io import loadmat
-
-import pyro.distributions as dist
-import pyro
-
 def simulate_worm_pc(atlas_file,info_file,n_sample):
     '''Generate simulated samples of worm point clouds using an atlas file
     '''
@@ -226,13 +229,10 @@ def simulate_worm_pc(atlas_file,info_file,n_sample):
 
 
 # %%
-from dipy.align.transforms import AffineTransform2D, RigidTransform2D, AffineTransform3D, RigidTransform3D
-from dipy.align.imaffine import AffineRegistration
-import ray
-
-
 @ray.remote
 def affine_register(fixed,moving,transform='rigid'):
+    '''Affine and rigid point cloud registration solver
+    '''
     affreg = AffineRegistration()
     if transform == 'rigid':
         if fixed.shape[2] == 1:
@@ -258,7 +258,10 @@ def affine_register(fixed,moving,transform='rigid'):
     
     return registered
 
+# %%
 def affine_atlas(A,dataloader,transform='rigid'):
+    '''Generate an affine or rigid atlas from data
+    '''
     refs = []
     for batch_idx, data in enumerate(dataloader):
         refs += [affine_register.remote(

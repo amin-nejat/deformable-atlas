@@ -4,25 +4,24 @@ Created on Thu Feb 10 10:09:22 2022
 
 @author: Amin
 """
+# %%
 import networkx as nx
 
 from torch.distributions import constraints
-
 from sklearn.neighbors import kneighbors_graph
 
 import torch.nn.functional as F
 import torch.nn as nn
 
 from pyro.infer import SVI, Trace_ELBO
-
 import pyro.distributions as dist
 import pyro
 
 import numpy as np
 import torch
-
 import utils
 
+from abc import abstractmethod
 # %%
 class ImageFlowField(nn.Module):
     '''Class for learning atlases for image datasets using free form flow field
@@ -411,8 +410,6 @@ class ImageQuadratic(nn.Module):
         self.A = aligned.mean(0).detach()
 
 # %%
-from abc import abstractmethod
-
 class PCPiecewiseRigid(nn.Module):
     '''Class for learning atlases for point cloud datasets using piecewise rigid
         transformations with regularization using pairwise distances of CoM of pieces.
@@ -536,7 +533,6 @@ class PCPiecewiseRigid(nn.Module):
         
 
 # %%
-
 class PCPiecewiseRigidDirichlet(PCPiecewiseRigid):
     '''Prior atlas distribution over position is multivariate normal while the 
         prior over the color is dirichlet.
@@ -607,7 +603,7 @@ class PCPiecewiseRigidDirichlet(PCPiecewiseRigid):
             self.A = torch.cat((self.theta_l,self.theta_c),1).T
         
 
-
+# %%
 class PCPiecewiseRigidNormal(PCPiecewiseRigid):
     '''Class for learning atlases for point cloud datasets using piecewise rigid
         (or rigid) transformations with regularization using pairwise distances 
@@ -653,7 +649,6 @@ class PCPiecewiseRigidNormal(PCPiecewiseRigid):
             counter = counter+1 if abs(loss-new_loss) < thresh else 0
             loss = new_loss
         
-        
         with torch.no_grad():
             self.theta_c = pyro.param('theta_c')
             self.theta_l = pyro.param('theta_l')
@@ -662,7 +657,6 @@ class PCPiecewiseRigidNormal(PCPiecewiseRigid):
             self.sigma_l = pyro.param('sigma_l')
             
             self.A = torch.cat((self.theta_l,self.theta_c),1).T
-
 
 # %%
 def train_model(
@@ -687,6 +681,7 @@ def train_model(
     Returns
     -------
     losses (list): training losses through iterations.
+    atlases (list): atlases generated in each iteration of the model.
     '''
     
     losses = []

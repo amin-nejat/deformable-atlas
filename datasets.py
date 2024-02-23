@@ -4,12 +4,12 @@ Created on Fri Feb 25 14:53:52 2022
 
 @author: Amin
 """
-from torch.utils.data import Dataset
-
+# %%
 import torch.nn as nn
 import torch
 
 from scipy.io import loadmat
+from torch.utils.data import Dataset
 
 import numpy as np
 import scipy as sp
@@ -17,7 +17,6 @@ import scipy as sp
 import utils
 import h5py
 
-# import pandas
 from PIL import Image
 import glob
 
@@ -109,8 +108,6 @@ class FlyWingDataset(Dataset):
 
         return image,idx
         
-        
-        
 # %%
 class ImageDataset(Dataset):
     '''Image dataset, to store and read image data in batches.
@@ -179,6 +176,9 @@ class PCImageDataset(Dataset):
 
 # %%
 class NeuroPALPC(Dataset):
+    '''Class containing data and methdos for point clouds derived from 
+        NeuroPAL datasets
+    '''
     def __init__(self,info,files,body,neurons=None,grouping='ganglion_set'):
         # grouping: ganglion, full, ganglion_set
         data = NeuroPALDataset.load_celegans_data(info)
@@ -397,8 +397,7 @@ class NeuroPALDataset(Dataset):
 
         return sample,idx
 
-
-
+# %%
 class Neuron:
     """Properties and methods related to a single neuron"""
     def __init__(self):
@@ -420,6 +419,8 @@ class Neuron:
         self.probabilistic_ids   = None # neuron IDs listed by descending probability
         self.probabilistic_probs = None # neuron ID probabilities
 
+
+# %%
 class NeuroPALImage:
     """A list of neurons in a certain body part"""
 
@@ -452,6 +453,3 @@ class NeuroPALImage:
     def get_annotations(obj):
         """Getter of neuron annotations"""
         return [neuron.annotation for neuron in obj.neurons]
-    
-
-    
