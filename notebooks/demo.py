@@ -6,6 +6,9 @@ Created on Mon Mar  7 19:41:57 2022
 """
 
 # %%
+import sys
+sys.path.insert(1,'..')
+
 import torch
 
 import visualization
